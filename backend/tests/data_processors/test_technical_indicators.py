@@ -96,3 +96,60 @@ def test_calculate_volatility(sample_data):
     assert len(volatility) == len(sample_data)
     assert not volatility[20:].isnull().any()
     assert (volatility >= 0).all()
+
+def test_calculate_stochastic(sample_data):
+    analyzer = TechnicalAnalyzer(sample_data)
+    k, d = analyzer.calculate_stochastic(period=14, smooth_k=3, smooth_d=3)
+
+    # Assert the lengths match
+    assert len(k) == len(sample_data)
+    assert len(d) == len(sample_data)
+
+    # Calculate the number of NaN values due to initialization
+    nan_count = 14 + 3 - 1  # Stochastic period + smoothing
+
+    # Check that values are not null after the initialization period
+    assert not k[nan_count:].isnull().any()
+    assert not d[nan_count:].isnull().any()
+
+
+def test_calculate_ichimoku(sample_data):
+    analyzer = TechnicalAnalyzer(sample_data)
+    tenkan, kijun, senkou_a, senkou_b, chikou = analyzer.calculate_ichimoku()
+
+    # Assert the lengths match
+    assert len(tenkan) == len(sample_data)
+    assert len(kijun) == len(sample_data)
+    assert len(senkou_a) == len(sample_data)
+    assert len(senkou_b) == len(sample_data)
+    assert len(chikou) == len(sample_data)
+
+    # Calculate the initialization periods
+    senkou_b_nan_count = 52  # Lookback for Senkou B
+    senkou_a_nan_count = 26 + 52  # Lookback for Senkou B + 26-period shift
+
+    # Validate after the necessary periods
+    assert not tenkan[9:].isnull().any()  # 9-period Tenkan
+    assert not kijun[26:].isnull().any()  # 26-period Kijun
+    assert not senkou_a[senkou_a_nan_count:].isnull().any()
+    assert not senkou_b[senkou_b_nan_count:].isnull().any()
+    assert not chikou.isnull().any()  # Chikou is shifted backward
+
+def test_calculate_fibonacci_retracements(sample_data):
+    analyzer = TechnicalAnalyzer(sample_data)
+    retracements = analyzer.calculate_fibonacci_retracements(period=20)
+
+    # Ensure all levels are calculated
+    assert len(retracements) == 6
+
+    # Validate retracement levels
+    assert retracements['0.0%'] == sample_data['close'].iloc[-1]
+    assert retracements['100.0%'] == sample_data['close'].iloc[-20]
+
+def test_calculate_obv(sample_data):
+    analyzer = TechnicalAnalyzer(sample_data)
+    obv = analyzer.calculate_obv()
+    
+    assert len(obv) == len(sample_data)
+    assert not obv.isnull().any()
+    assert isinstance(obv, pd.Series)
