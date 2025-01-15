@@ -1,20 +1,68 @@
 # app/data_collectors/price_collector.py
-import ccxt.async_support as ccxt_async
+import ccxt
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Callable
+import logging
 import websockets
 import asyncio
 import json
-from datetime import datetime
-from typing import Callable, Dict, Optional
-import logging
 
 class CryptoPriceCollector:
     def __init__(self, exchange_id: str = 'binance'):
         self.exchange_id = exchange_id
-        self.exchange = getattr(ccxt_async, exchange_id)()
+        self.exchange = getattr(ccxt, exchange_id)()
         self.ws = None
-        self.subscribers: Dict[str, list[Callable]] = {}
+        self.subscribers = {}
         self.running = False
         self.logger = logging.getLogger(__name__)
+        self.supported_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+
+    def get_supported_timeframes(self) -> List[str]:
+        """Get list of supported timeframes"""
+        return self.supported_timeframes
+
+    def fetch_historical_data(
+        self,
+        symbol: str,
+        timeframe: str = '1h',
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> pd.DataFrame:
+        """
+        Fetch historical OHLCV data
+        """
+        try:
+            if timeframe not in self.supported_timeframes:
+                raise ValueError(f"Unsupported timeframe. Must be one of {self.supported_timeframes}")
+
+            # Convert times to timestamps if provided
+            since = int(start_time.timestamp() * 1000) if start_time else None
+            until = int(end_time.timestamp() * 1000) if end_time else None
+
+            # Fetch OHLCV data
+            ohlcv = self.exchange.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                since=since,
+                limit=1000  # Most exchanges limit to 1000 candles per request
+            )
+
+            # Convert to DataFrame
+            df = pd.DataFrame(
+                ohlcv,
+                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            )
+
+            # Convert timestamp to datetime
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+
+            return df
+
+        except ccxt.ExchangeError as e:
+            if "symbol" in str(e).lower():
+                raise ValueError(f"Invalid symbol: {symbol}")
+            raise e
 
     async def connect_realtime(self, symbol: Optional[str] = None) -> bool:
         """Connect to exchange websocket for real-time data"""

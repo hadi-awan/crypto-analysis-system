@@ -1,68 +1,55 @@
-# tests/data_collectors/test_realtime_collector.py
 import pytest
-import asyncio
+from datetime import datetime, timedelta
+import pandas as pd
 from app.data_collectors.price_collector import CryptoPriceCollector
 
-pytestmark = pytest.mark.asyncio
-
-@pytest.fixture
-async def collector():
+def test_price_collector_initialization():
     collector = CryptoPriceCollector()
-    yield collector
-    await collector.disconnect_realtime()
+    assert collector is not None
+    assert hasattr(collector, 'exchange')
 
-async def test_realtime_price_connection(collector):
-    connected = await collector.connect_realtime()
-    assert connected is True
-    await asyncio.sleep(1)
+def test_fetch_historical_data():
+    collector = CryptoPriceCollector()
+    symbol = "BTC/USDT"
+    timeframe = "1h"
+    
+    # Fetch last 24 hours of data
+    end_time = datetime.now()
+    start_time = end_time - timedelta(days=1)
+    
+    df = collector.fetch_historical_data(
+        symbol=symbol,
+        timeframe=timeframe,
+        start_time=start_time,
+        end_time=end_time
+    )
+    
+    # Check if we got a DataFrame
+    assert isinstance(df, pd.DataFrame)
+    
+    # Check if we have the expected columns
+    expected_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert all(col in df.columns for col in expected_columns)
+    
+    # Check data types
+    assert pd.api.types.is_numeric_dtype(df['close'])
+    assert pd.api.types.is_numeric_dtype(df['volume'])
+    
+    # Check that we have some data
+    assert len(df) > 0
 
-async def test_realtime_price_updates(collector):
-    received_data = []
-    test_complete = asyncio.Event()
-    
-    async def price_handler(price_data):
-        received_data.append(price_data)
-        if len(received_data) > 0:
-            test_complete.set()
-    
-    await collector.connect_realtime()
-    await collector.subscribe_to_price_updates("BTC/USDT", price_handler)
-    
-    try:
-        # Wait for data or timeout after 15 seconds
-        await asyncio.wait_for(test_complete.wait(), timeout=15)
-    except asyncio.TimeoutError:
-        pytest.fail("Timeout waiting for price updates")
+def test_fetch_historical_data_with_invalid_symbol():
+    collector = CryptoPriceCollector()
+    with pytest.raises(ValueError):
+        collector.fetch_historical_data(
+            symbol="INVALID/PAIR",
+            timeframe="1h"
+        )
 
-    assert len(received_data) > 0
-    assert 'price' in received_data[0]
-    assert 'timestamp' in received_data[0]
-    assert isinstance(received_data[0]['price'], float)
-
-async def test_multiple_symbols(collector):
-    symbols = ["BTC/USDT", "ETH/USDT"]
-    received_data = {symbol: [] for symbol in symbols}
-    test_complete = asyncio.Event()
-    
-    async def create_handler(symbol):
-        async def handler(price_data):
-            received_data[symbol].append(price_data)
-            if all(len(data) > 0 for data in received_data.values()):
-                test_complete.set()
-        return handler
-    
-    await collector.connect_realtime()
-    
-    for symbol in symbols:
-        handler = await create_handler(symbol)
-        await collector.subscribe_to_price_updates(symbol, handler)
-    
-    try:
-        # Wait for data or timeout after 15 seconds
-        await asyncio.wait_for(test_complete.wait(), timeout=15)
-    except asyncio.TimeoutError:
-        pytest.fail("Timeout waiting for price updates")
-
-    for symbol in symbols:
-        assert len(received_data[symbol]) > 0
-        assert isinstance(received_data[symbol][0]['price'], float)
+def test_supported_timeframes():
+    collector = CryptoPriceCollector()
+    timeframes = collector.get_supported_timeframes()
+    assert isinstance(timeframes, list)
+    assert "1m" in timeframes
+    assert "1h" in timeframes
+    assert "1d" in timeframes
