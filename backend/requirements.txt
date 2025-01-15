@@ -4,4 +4,6 @@ ccxt
 pandas
 psycopg2-binary
 python-dotenv
+pydantic
+pydantic-settings
 pytest
