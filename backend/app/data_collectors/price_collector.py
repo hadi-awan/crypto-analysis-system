@@ -91,3 +91,48 @@ class CryptoPriceCollector:
         if self.ws:
             await self.ws.close()
             self.ws = None
+    
+    async def _process_price_data(self, raw_data: Dict) -> Optional[Dict]:
+        """Process and validate price data before sending to subscribers"""
+        try:
+            price_data = {
+                'symbol': raw_data['s'],
+                'price': float(raw_data['c']),
+                'volume': float(raw_data['v']),
+                'timestamp': datetime.now(),
+            }
+            
+            validator = PriceDataValidator()
+            result = validator.validate_price_data(price_data)
+            
+            if not result.is_valid:
+                self.logger.warning(f"Invalid price data: {result.errors}")
+                return None
+                
+            return result.validated_data
+            
+        except Exception as e:
+            self.logger.error(f"Error processing price data: {str(e)}")
+            return None
+
+    async def _listen_to_stream(self):
+        while self.running and self.ws:
+            try:
+                message = await self.ws.recv()
+                data = json.loads(message)
+                
+                if isinstance(data, list):
+                    for ticker in data:
+                        validated_data = await self._process_price_data(ticker)
+                        if validated_data:
+                            symbol = validated_data['symbol'].lower()
+                            if symbol in self.subscribers:
+                                for callback in self.subscribers[symbol]:
+                                    await callback(validated_data)
+                        
+            except websockets.ConnectionClosed:
+                self.logger.warning("WebSocket connection closed")
+                await self.reconnect()
+            except Exception as e:
+                self.logger.error(f"Error in WebSocket stream: {str(e)}")
+                await asyncio.sleep(1)
