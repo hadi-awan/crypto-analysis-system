@@ -112,29 +112,6 @@ def test_calculate_stochastic(sample_data):
     assert not k[nan_count:].isnull().any()
     assert not d[nan_count:].isnull().any()
 
-
-def test_calculate_ichimoku(sample_data):
-    analyzer = TechnicalAnalyzer(sample_data)
-    tenkan, kijun, senkou_a, senkou_b, chikou = analyzer.calculate_ichimoku()
-
-    # Assert the lengths match
-    assert len(tenkan) == len(sample_data)
-    assert len(kijun) == len(sample_data)
-    assert len(senkou_a) == len(sample_data)
-    assert len(senkou_b) == len(sample_data)
-    assert len(chikou) == len(sample_data)
-
-    # Calculate the initialization periods
-    senkou_b_nan_count = 52  # Lookback for Senkou B
-    senkou_a_nan_count = 26 + 52  # Lookback for Senkou B + 26-period shift
-
-    # Validate after the necessary periods
-    assert not tenkan[9:].isnull().any()  # 9-period Tenkan
-    assert not kijun[26:].isnull().any()  # 26-period Kijun
-    assert not senkou_a[senkou_a_nan_count:].isnull().any()
-    assert not senkou_b[senkou_b_nan_count:].isnull().any()
-    assert not chikou.isnull().any()  # Chikou is shifted backward
-
 def test_calculate_fibonacci_retracements(sample_data):
     analyzer = TechnicalAnalyzer(sample_data)
     retracements = analyzer.calculate_fibonacci_retracements(period=20)

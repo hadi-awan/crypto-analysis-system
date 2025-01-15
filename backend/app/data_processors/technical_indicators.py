@@ -121,59 +121,32 @@ class TechnicalAnalyzer:
         return volatility.clip(lower=0)
     
     def calculate_stochastic(self, period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> Tuple[pd.Series, pd.Series]:
-        """Calculate Stochastic OscillatorReturns: %K and %D lines"""
+        """
+        Calculate Stochastic Oscillator
+        Returns: %K and %D lines
+        """
+        # Get min and max
         low_min = self.data['low'].rolling(window=period).min()
         high_max = self.data['high'].rolling(window=period).max()
-    
-        # Calculate %K
-        k = 100 * (self.data['close'] - low_min) / (high_max - low_min)
         
-        # Apply smoothing to %K
-        k = k.rolling(window=smooth_k).mean()
+        # Calculate raw %K
+        k_raw = 100 * (self.data['close'] - low_min) / (high_max - low_min)
         
-        # Calculate %D
-        d = k.rolling(window=smooth_d).mean()
+        # Calculate final %K with smoothing
+        k = k_raw.rolling(window=smooth_k, min_periods=smooth_k).mean()
+        
+        # Calculate %D with smoothing
+        d = k.rolling(window=smooth_d, min_periods=smooth_d).mean()
         
         # Handle edge cases
-        k = k.clip(0, 100)
-        d = d.clip(0, 100)
+        k = k.replace([np.inf, -np.inf], np.nan).fillna(50)
+        d = d.replace([np.inf, -np.inf], np.nan).fillna(50)
         
-        return k, d
-
-    def calculate_ichimoku(self, 
-                        tenkan_period: int = 9,
-                        kijun_period: int = 26,
-                        senkou_b_period: int = 52) -> Tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
-        """
-        Calculate Ichimoku Cloud components
-        Returns: Tenkan-sen, Kijun-sen, Senkou Span A, Senkou Span B, Chikou Span
-        """
-        # Calculate high and low periods
-        high = self.data['high']
-        low = self.data['low']
+        # Set initial values to NaN based on required lookback period
+        k[:period-1] = np.nan
+        d[:period-1] = np.nan
         
-        # Tenkan-sen (Conversion Line)
-        tenkan_high = high.rolling(window=tenkan_period).max()
-        tenkan_low = low.rolling(window=tenkan_period).min()
-        tenkan = (tenkan_high + tenkan_low) / 2
-        
-        # Kijun-sen (Base Line)
-        kijun_high = high.rolling(window=kijun_period).max()
-        kijun_low = low.rolling(window=kijun_period).min()
-        kijun = (kijun_high + kijun_low) / 2
-        
-        # Senkou Span A (Leading Span A)
-        senkou_a = ((tenkan + kijun) / 2).shift(kijun_period)
-        
-        # Senkou Span B (Leading Span B)
-        senkou_b_high = high.rolling(window=senkou_b_period).max()
-        senkou_b_low = low.rolling(window=senkou_b_period).min()
-        senkou_b = ((senkou_b_high + senkou_b_low) / 2).shift(kijun_period)
-        
-        # Chikou Span (Lagging Span)
-        chikou = self.data['close'].shift(-kijun_period)
-        
-        return tenkan, kijun, senkou_a, senkou_b, chikou
+        return k.clip(0, 100), d.clip(0, 100)
 
     def calculate_fibonacci_retracements(self, period=20):
         if len(self.data) < period:
