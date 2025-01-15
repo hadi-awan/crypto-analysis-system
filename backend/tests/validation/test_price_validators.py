@@ -1,5 +1,5 @@
 import pytest
-from app.core.validation.price_validators import (
+from app.validation.price_validators import (
     PriceDataValidator,
     ValidationErrorCode
 )
