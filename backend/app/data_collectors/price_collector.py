@@ -7,6 +7,8 @@ import logging
 import websockets
 import asyncio
 import json
+from app.validation.price_validators import PriceDataValidator
+
 
 class CryptoPriceCollector:
     def __init__(self, exchange_id: str = 'binance'):
@@ -21,7 +23,7 @@ class CryptoPriceCollector:
     def get_supported_timeframes(self) -> List[str]:
         """Get list of supported timeframes"""
         return self.supported_timeframes
-
+    
     def fetch_historical_data(
         self,
         symbol: str,
@@ -36,13 +38,16 @@ class CryptoPriceCollector:
             if timeframe not in self.supported_timeframes:
                 raise ValueError(f"Unsupported timeframe. Must be one of {self.supported_timeframes}")
 
+            # Normalize symbol format for exchange fetching (e.g., BTC/USDT -> BTCUSDT)
+            exchange_symbol = symbol.replace('/', '').upper()
+
             # Convert times to timestamps if provided
             since = int(start_time.timestamp() * 1000) if start_time else None
             until = int(end_time.timestamp() * 1000) if end_time else None
 
             # Fetch OHLCV data
             ohlcv = self.exchange.fetch_ohlcv(
-                symbol,
+                exchange_symbol,  # Use the normalized symbol
                 timeframe=timeframe,
                 since=since,
                 limit=1000  # Most exchanges limit to 1000 candles per request

@@ -30,14 +30,17 @@ class PriceValidationResult:
 class PriceDataValidator:
     def __init__(self):
         self.REQUIRED_FIELDS = ['symbol', 'price', 'volume', 'timestamp']
-        self.MAX_PRICE = 1e6  # Maximum reasonable price
-        self.MIN_PRICE = 1e-8  # Minimum reasonable price
-        self.MAX_VOLUME = 1e6  # Maximum reasonable volume
+        self.MAX_PRICE = 1e10  # Maximum reasonable price
+        self.MIN_PRICE = 1e-10  # Minimum reasonable price
+        self.MAX_VOLUME = 1e14  # Maximum reasonable volume
         
     def validate_price_data(self, data: Dict[str, Any]) -> PriceValidationResult:
         """Validate a single price data point"""
         errors = []
         warnings = []
+        
+        # Debugging: Print the symbol before validation
+        print(f"Validating symbol: {repr(data['symbol'])}")
         
         # Check required fields
         for field in self.REQUIRED_FIELDS:
@@ -73,17 +76,45 @@ class PriceDataValidator:
             
         # Validate symbol format
         if '/' not in data['symbol']:
-            errors.append(ValidationError(
-                code=ValidationErrorCode.SYMBOL_FORMAT,
-                message="Invalid symbol format. Expected format: BASE/QUOTE (e.g., BTC/USDT)"
-            ))
+            # Try splitting based on common quote suffixes (e.g., USDT, USDC, TUSD)
+            quote_suffixes = ['USDT', 'USDC', 'TUSD', 'BTC', 'ETH']
             
+            for suffix in quote_suffixes:
+                if data['symbol'].endswith(suffix):
+                    base = data['symbol'][:-len(suffix)]
+                    quote = suffix
+                    data['symbol'] = f"{base}/{quote}"
+                    print(f"Formatted symbol to: {data['symbol']}")
+                    break
+            else:
+                # If no suffix matches, attempt a simple middle split for long symbols
+                if len(data['symbol']) > 4:
+                    base = data['symbol'][:len(data['symbol'])//2]
+                    quote = data['symbol'][len(data['symbol'])//2:]
+                    data['symbol'] = f"{base}/{quote}"
+                    print(f"Formatted symbol to: {data['symbol']}")
+                elif len(data['symbol']) == 4:  # Handling very short symbols
+                    base = data['symbol'][0]  # Take the first character
+                    quote = data['symbol'][1:]  # The rest as quote
+                    data['symbol'] = f"{base}/{quote}"
+                    print(f"Formatted symbol to: {data['symbol']}")
+                else:
+                    errors.append(ValidationError(
+                        code=ValidationErrorCode.SYMBOL_FORMAT,
+                        message="Invalid symbol format. Expected format: BASE/QUOTE (e.g., BTC/USDT)"
+                    ))
+
+        # Debugging: print errors if any
+        if errors:
+            print(f"Validation errors: {errors}")
+
         return PriceValidationResult(
             is_valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
             validated_data=data if len(errors) == 0 else None
         )
+
         
     def validate_historical_data(self, df: pd.DataFrame) -> PriceValidationResult:
         """Validate historical price data"""

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import pandas as pd
 from typing import List, Callable, Optional
+from app.validation.price_validators import PriceDataValidator
 
 class SignalType(Enum):
     BUY = "BUY"

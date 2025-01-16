@@ -6,6 +6,7 @@ import logging
 from app.data_collectors.price_collector import CryptoPriceCollector
 from app.data_processors.technical_indicators import TechnicalAnalyzer
 from app.services.signals.signal_generator import SignalGenerator, Signal
+from app.validation.price_validators import PriceDataValidator
 
 class RealtimeAnalyzer:
     def __init__(self, symbol: str):
