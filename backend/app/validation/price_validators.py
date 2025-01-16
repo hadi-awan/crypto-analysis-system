@@ -39,9 +39,6 @@ class PriceDataValidator:
         errors = []
         warnings = []
         
-        # Debugging: Print the symbol before validation
-        print(f"Validating symbol: {repr(data['symbol'])}")
-        
         # Check required fields
         for field in self.REQUIRED_FIELDS:
             if field not in data:
@@ -84,7 +81,6 @@ class PriceDataValidator:
                     base = data['symbol'][:-len(suffix)]
                     quote = suffix
                     data['symbol'] = f"{base}/{quote}"
-                    print(f"Formatted symbol to: {data['symbol']}")
                     break
             else:
                 # If no suffix matches, attempt a simple middle split for long symbols
@@ -92,12 +88,10 @@ class PriceDataValidator:
                     base = data['symbol'][:len(data['symbol'])//2]
                     quote = data['symbol'][len(data['symbol'])//2:]
                     data['symbol'] = f"{base}/{quote}"
-                    print(f"Formatted symbol to: {data['symbol']}")
                 elif len(data['symbol']) == 4:  # Handling very short symbols
                     base = data['symbol'][0]  # Take the first character
                     quote = data['symbol'][1:]  # The rest as quote
                     data['symbol'] = f"{base}/{quote}"
-                    print(f"Formatted symbol to: {data['symbol']}")
                 else:
                     errors.append(ValidationError(
                         code=ValidationErrorCode.SYMBOL_FORMAT,
