@@ -1,3 +1,4 @@
+
 import pytest
 import asyncio
 from datetime import datetime
@@ -18,12 +19,16 @@ class MockPriceCollector:
 
     async def subscribe_to_price_updates(self, symbol: str, callback):
         self.callbacks.append(callback)
-        # Simulate enough price updates to generate indicators
-        for i in range(15):  # Need at least 14 points for indicators
+        # Send multiple updates to build enough history
+        base_price = 50000.0
+        for i in range(15):  # Send 15 updates
+            price = base_price + (i * 100)  # Add some price movement
             await callback({
                 'timestamp': datetime.now(),
-                'price': 50000.0 + (i * 100),  # Add some price movement
-                'volume': 1000.0 + (i * 10)
+                'price': price,
+                'high': price * 1.01,
+                'low': price * 0.99,
+                'volume': 1000.0
             })
 
 @pytest.fixture

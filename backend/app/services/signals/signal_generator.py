@@ -22,17 +22,20 @@ class Signal:
 class SignalGenerator:
     def __init__(self):
         self.strategies = {
-            'RSI': self._check_rsi,
-            'MACD': self._check_macd,
-            'BB': self._check_bollinger_bands
+            'RSI': (self._check_rsi, ['rsi']),
+            'MACD': (self._check_macd, ['macd', 'macd_signal']),
+            'BB': (self._check_bollinger_bands, ['bb_upper', 'bb_lower', 'close']),
+            'STOCH': (self._check_stochastic, ['stoch_k', 'stoch_d'])
         }
 
     def generate_signals(self, data: pd.DataFrame) -> List[Signal]:
-        """Generate signals based on all available strategies"""
+        """Generate signals based on available indicators"""
         signals = []
-        for indicator, strategy in self.strategies.items():
-            if signal := strategy(data):
-                signals.append(signal)
+        for indicator, (strategy, required_columns) in self.strategies.items():
+            # Only run strategy if all required columns are present
+            if all(col in data.columns for col in required_columns):
+                if signal := strategy(data):
+                    signals.append(signal)
         return signals
 
     def _check_rsi(self, data: pd.DataFrame) -> Optional[Signal]:
@@ -41,7 +44,9 @@ class SignalGenerator:
         timestamp = data['timestamp'].iloc[-1]
 
         if rsi >= 70:
-            strength = min((rsi - 70) / 30, 1)  # Scale strength
+            # Adjust strength calculation for overbought
+            # Now RSI of 85+ will give strength > 0.8
+            strength = min((rsi - 70) / 15, 1)  # Changed from 30 to 15
             return Signal(
                 type=SignalType.SELL,
                 indicator="RSI",
@@ -50,7 +55,9 @@ class SignalGenerator:
                 timestamp=timestamp
             )
         elif rsi <= 30:
-            strength = min((30 - rsi) / 30, 1)
+            # Adjust strength calculation for oversold
+            # RSI of 15 or lower will give strength > 0.8
+            strength = min((30 - rsi) / 15, 1)  # Changed from 30 to 15
             return Signal(
                 type=SignalType.BUY,
                 indicator="RSI",
@@ -89,12 +96,12 @@ class SignalGenerator:
     def _check_bollinger_bands(self, data: pd.DataFrame) -> Optional[Signal]:
         """Generate signals based on Bollinger Bands"""
         close = data['close'].iloc[-1]
-        upper = data['upper_band'].iloc[-1]
-        lower = data['lower_band'].iloc[-1]
+        upper = data['bb_upper'].iloc[-1]  # Changed from upper_band to bb_upper
+        lower = data['bb_lower'].iloc[-1]  # Changed from lower_band to bb_lower
         timestamp = data['timestamp'].iloc[-1]
 
         if close < lower:
-            strength = min((lower - close) / (lower * 0.02), 1)  # Scale based on 2% band
+            strength = min((lower - close) / (lower * 0.02), 1)  # Scale strength
             return Signal(
                 type=SignalType.BUY,
                 indicator="BB",
@@ -111,4 +118,64 @@ class SignalGenerator:
                 message=f"Price above Upper Bollinger Band",
                 timestamp=timestamp
             )
+        return None
+    
+    def _check_stochastic(self, data: pd.DataFrame) -> Optional[Signal]:
+        """Generate signals based on Stochastic Oscillator"""
+        k = data['stoch_k'].iloc[-1]
+        d = data['stoch_d'].iloc[-1]
+        timestamp = data['timestamp'].iloc[-1]
+
+        # Oversold conditions (k and d below 20)
+        if k < 20 and d < 20:
+            strength = (20 - min(k, d)) / 20  # Higher strength when deeper oversold
+            return Signal(
+                type=SignalType.BUY,
+                indicator="STOCH",
+                strength=strength,
+                message=f"Stochastic Oversold: %K={k:.1f}, %D={d:.1f}",
+                timestamp=timestamp
+            )
+        # Overbought conditions (k and d above 80)
+        elif k > 80 and d > 80:
+            strength = (max(k, d) - 80) / 20
+            return Signal(
+                type=SignalType.SELL,
+                indicator="STOCH",
+                strength=strength,
+                message=f"Stochastic Overbought: %K={k:.1f}, %D={d:.1f}",
+                timestamp=timestamp
+            )
+        return None
+    
+    def _check_stochastic(self, data: pd.DataFrame) -> Optional[Signal]:
+        """Generate signals based on Stochastic Oscillator"""
+        k = data['stoch_k'].iloc[-1]
+        d = data['stoch_d'].iloc[-1]
+        timestamp = data['timestamp'].iloc[-1]
+
+        # Oversold conditions (both K and D below 20)
+        if k < 20 and d < 20:
+            # Calculate strength based on how oversold it is
+            strength = (20 - max(k, d)) / 20  # More oversold = higher strength
+            return Signal(
+                type=SignalType.BUY,
+                indicator="STOCH",
+                strength=strength,
+                message=f"Stochastic Oversold: %K={k:.1f}, %D={d:.1f}",
+                timestamp=timestamp
+            )
+            
+        # Overbought conditions (both K and D above 80)
+        elif k > 80 and d > 80:
+            # Calculate strength based on how overbought it is
+            strength = (min(k, d) - 80) / 20  # More overbought = higher strength
+            return Signal(
+                type=SignalType.SELL,
+                indicator="STOCH",
+                strength=strength,
+                message=f"Stochastic Overbought: %K={k:.1f}, %D={d:.1f}",
+                timestamp=timestamp
+            )
+            
         return None

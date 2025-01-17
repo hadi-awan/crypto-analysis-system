@@ -71,11 +71,12 @@ class RealtimeAnalyzer:
                 self.logger.error(f"Error in signal callback: {str(e)}")
 
     async def handle_price_update(self, price_data: Dict, callback: Optional[Callable] = None):
-        """Handle new price data, calculate indicators and generate signals"""
         try:
             new_data = pd.DataFrame([{
                 'timestamp': price_data['timestamp'],
                 'close': float(price_data['price']),
+                'high': float(price_data.get('high', price_data['price'])),
+                'low': float(price_data.get('low', price_data['price'])),
                 'volume': float(price_data['volume'])
             }])
             
@@ -88,42 +89,55 @@ class RealtimeAnalyzer:
             if len(self.data_buffer) >= 14:
                 analyzer = TechnicalAnalyzer(self.data_buffer)
                 
-                # Calculate all required indicators
-                latest_data = self.data_buffer.iloc[-1:].copy()
-                latest_data['rsi'] = analyzer.calculate_rsi().iloc[-1]
-                macd, signal, _ = analyzer.calculate_macd()
-                latest_data['macd'] = macd.iloc[-1]
-                latest_data['macd_signal'] = signal.iloc[-1]
-                upper, middle, lower = analyzer.calculate_bollinger_bands()
-                latest_data['upper_band'] = upper.iloc[-1]
-                latest_data['middle_band'] = middle.iloc[-1]
-                latest_data['lower_band'] = lower.iloc[-1]
+                # Calculate indicators
+                latest_data = pd.DataFrame([{
+                    'timestamp': price_data['timestamp'],
+                    'close': float(price_data['price']),
+                    'volume': float(price_data['volume']),
+                    'rsi': float(analyzer.calculate_rsi().iloc[-1]),
+                    'macd': float(analyzer.calculate_macd()[0].iloc[-1]),
+                    'macd_signal': float(analyzer.calculate_macd()[1].iloc[-1])
+                }])
                 
-                # Notify indicator subscribers
-                for indicator, value in {
-                    'rsi': float(latest_data['rsi']),
-                    'macd': float(latest_data['macd'])
-                }.items():
-                    if indicator in self.subscribers:
-                        for callback in self.subscribers[indicator]:
-                            await callback({
-                                'indicator': indicator,
-                                'value': value
-                            })
-                
-                # Generate and notify signals
-                signals = self.signal_generator.generate_signals(latest_data)
-                for signal in signals:
-                    await self._notify_signal_subscribers(signal)
+                # Add Bollinger Bands
+                bb_upper, bb_middle, bb_lower = analyzer.calculate_bollinger_bands()
+                latest_data['bb_upper'] = float(bb_upper.iloc[-1])
+                latest_data['bb_middle'] = float(bb_middle.iloc[-1])
+                latest_data['bb_lower'] = float(bb_lower.iloc[-1])
+
+                # Add Stochastic
+                stoch_k, stoch_d = analyzer.calculate_stochastic()
+                latest_data['stoch_k'] = float(stoch_k.iloc[-1])
+                latest_data['stoch_d'] = float(stoch_d.iloc[-1])
                 
                 # Update stored indicators
                 self.indicators = {
-                    'rsi': float(latest_data['rsi']),
-                    'macd': float(latest_data['macd']),
-                    'macd_signal': float(latest_data['macd_signal']),
-                    'bb_upper': float(latest_data['upper_band']),
-                    'bb_lower': float(latest_data['lower_band'])
+                    'rsi': latest_data['rsi'].iloc[0],
+                    'macd': latest_data['macd'].iloc[0],
+                    'macd_signal': latest_data['macd_signal'].iloc[0],
+                    'bb_upper': latest_data['bb_upper'].iloc[0],
+                    'bb_lower': latest_data['bb_lower'].iloc[0],
+                    'stoch_k': latest_data['stoch_k'].iloc[0],
+                    'stoch_d': latest_data['stoch_d'].iloc[0]
                 }
+
+                # Notify indicator subscribers
+                for indicator, value in self.indicators.items():
+                    if indicator in self.subscribers:
+                        for subscriber in self.subscribers[indicator]:
+                            try:
+                                await subscriber({
+                                    'indicator': indicator,
+                                    'value': value,
+                                    'timestamp': price_data['timestamp']
+                                })
+                            except Exception as e:
+                                self.logger.error(f"Error in indicator callback: {str(e)}")
+                
+                # Generate signals
+                signals = self.signal_generator.generate_signals(latest_data)
+                for signal in signals:
+                    await self._notify_signal_subscribers(signal)
                 
                 # Notify general callback if provided
                 if callback:
