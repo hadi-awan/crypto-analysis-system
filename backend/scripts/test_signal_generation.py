@@ -16,7 +16,7 @@ async def main():
     collector = CryptoPriceCollector()
     df = collector.fetch_historical_data(
         symbol="BTC/USDT",
-        timeframe="1h",
+        timeframe="6h",
         start_time=datetime.now() - timedelta(days=7)
     )
     

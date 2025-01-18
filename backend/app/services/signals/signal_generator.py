@@ -46,7 +46,7 @@ class SignalGenerator:
         if rsi >= 70:
             # Adjust strength calculation for overbought
             # Now RSI of 85+ will give strength > 0.8
-            strength = min((rsi - 70) / 15, 1)  # Changed from 30 to 15
+            strength = min((rsi - 70) / 15, 1)
             return Signal(
                 type=SignalType.SELL,
                 indicator="RSI",
@@ -57,7 +57,7 @@ class SignalGenerator:
         elif rsi <= 30:
             # Adjust strength calculation for oversold
             # RSI of 15 or lower will give strength > 0.8
-            strength = min((30 - rsi) / 15, 1)  # Changed from 30 to 15
+            strength = min((30 - rsi) / 15, 1)
             return Signal(
                 type=SignalType.BUY,
                 indicator="RSI",
@@ -68,29 +68,55 @@ class SignalGenerator:
         return None
 
     def _check_macd(self, data: pd.DataFrame) -> Optional[Signal]:
-        """Generate signals based on MACD crossover"""
+        """Generate signals based on MACD crossover and zero line."""
         macd = data['macd'].iloc[-1]
         signal = data['macd_signal'].iloc[-1]
         timestamp = data['timestamp'].iloc[-1]
 
+        # Determine if the MACD is above or below the zero line
+        macd_above_zero = macd > 0
+        macd_below_zero = macd < 0
+
+        # MACD Bullish Crossover (above the zero line is a stronger signal)
         if macd > signal:
             strength = min((macd - signal) / signal * 100, 1)
-            return Signal(
-                type=SignalType.BUY,
-                indicator="MACD",
-                strength=strength,
-                message=f"MACD Bullish Crossover",
-                timestamp=timestamp
-            )
+            if macd_above_zero:  # Additional confirmation: MACD above zero
+                return Signal(
+                    type=SignalType.BUY,
+                    indicator="MACD",
+                    strength=strength,
+                    message=f"MACD Bullish Crossover (Strong, Above Zero Line)",
+                    timestamp=timestamp
+                )
+            else:
+                return Signal(
+                    type=SignalType.BUY,
+                    indicator="MACD",
+                    strength=strength,
+                    message=f"MACD Bullish Crossover (Weak, Below Zero Line)",
+                    timestamp=timestamp
+                )
+
+        # MACD Bearish Crossover (below the zero line is a stronger signal)
         elif macd < signal:
             strength = min((signal - macd) / signal * 100, 1)
-            return Signal(
-                type=SignalType.SELL,
-                indicator="MACD",
-                strength=strength,
-                message=f"MACD Bearish Crossover",
-                timestamp=timestamp
-            )
+            if macd_below_zero:  # Additional confirmation: MACD below zero
+                return Signal(
+                    type=SignalType.SELL,
+                    indicator="MACD",
+                    strength=strength,
+                    message=f"MACD Bearish Crossover (Strong, Below Zero Line)",
+                    timestamp=timestamp
+                )
+            else:
+                return Signal(
+                    type=SignalType.SELL,
+                    indicator="MACD",
+                    strength=strength,
+                    message=f"MACD Bearish Crossover (Weak, Above Zero Line)",
+                    timestamp=timestamp
+                )
+
         return None
 
     def _check_bollinger_bands(self, data: pd.DataFrame) -> Optional[Signal]:

@@ -158,3 +158,49 @@ async def test_signal_filtering_cooldown():
             time_diff = (signal.timestamp - signal_times[key]).total_seconds()
             assert time_diff >= 300
         signal_times[key] = signal.timestamp
+
+@pytest.mark.asyncio
+async def test_signal_integration():
+    """Test complete signal generation and filtering workflow"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    filtered_signals = []
+    all_signals = []
+
+    async def signal_handler(signal):
+        filtered_signals.append(signal)
+
+    # Set up filtering with more lenient conditions
+    analyzer.signal_filter = SignalFilter(FilterConfig(
+        min_strength=0.3,  # Lower strength requirement
+        required_confirmations=1,  # No confirmations needed
+        cooldown_period=1,  # Short cooldown
+        allowed_indicators=['RSI', 'MACD', 'BB', 'STOCH']  # All indicators allowed
+    ))
+
+    await analyzer.subscribe_to_signals(signal_handler)
+    
+    # Generate more data points with significant price movement
+    base_price = 50000
+    for i in range(20):  # More data points
+        multiplier = 1 - (i * 0.02)  # 2% drop each time
+        price = base_price * multiplier
+        await analyzer.handle_price_update({
+            'timestamp': datetime.now(),
+            'price': price,
+            'high': price * 1.02,  # More volatile price movement
+            'low': price * 0.98,
+            'volume': 1000.0 * (1 + (i * 0.1))  # Increasing volume
+        })
+        await asyncio.sleep(0.1)
+
+    assert len(filtered_signals) > 0, "Should generate some signals"
+    
+    # Verify signal properties
+    for signal in filtered_signals:
+        assert signal.strength >= 0.3, "All signals should meet strength threshold"
+        assert signal.timestamp is not None, "Signals should have timestamps"
+        assert signal.type in [SignalType.BUY, SignalType.SELL], "Signals should have valid types"
+        print(f"Generated signal: {signal.type.value} from {signal.indicator} with strength {signal.strength}")
+
+    # Log indicator values for debugging
+    print("\nFinal indicator values:", analyzer.indicators)
