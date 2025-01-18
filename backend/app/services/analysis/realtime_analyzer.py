@@ -1,4 +1,3 @@
-# app/services/analysis/realtime_analyzer.py
 from typing import Dict, List, Callable, Optional
 import pandas as pd
 import asyncio
@@ -7,6 +6,8 @@ from app.data_collectors.price_collector import CryptoPriceCollector
 from app.data_processors.technical_indicators import TechnicalAnalyzer
 from app.services.signals.signal_generator import SignalGenerator, Signal
 from app.validation.price_validators import PriceDataValidator
+from app.services.signals.signal_filter import SignalFilter, FilterConfig
+
 
 class RealtimeAnalyzer:
     def __init__(self, symbol: str):
@@ -16,9 +17,13 @@ class RealtimeAnalyzer:
         self.buffer_size = 100
         self.indicators = {}
         self.signal_generator = SignalGenerator()
-        self.signal_subscribers: Dict[str, List[Callable]] = {
-            'ALL': []  # Subscribers that want all signals
-        }
+        self.signal_filter = SignalFilter(FilterConfig(
+            min_strength=0.3,
+            required_confirmations=2,
+            cooldown_period=300,  # 5 minutes
+            allowed_indicators=['RSI', 'MACD', 'BB', 'STOCH']
+        ))
+        self.signal_subscribers: Dict[str, List[Callable]] = {'ALL': []}
         self.subscribers: Dict[str, List[Callable]] = {}
         self.running = False
         self.logger = logging.getLogger(__name__)
@@ -136,8 +141,13 @@ class RealtimeAnalyzer:
                 
                 # Generate signals
                 signals = self.signal_generator.generate_signals(latest_data)
+                filtered_signals = []
+        
                 for signal in signals:
-                    await self._notify_signal_subscribers(signal)
+                    if self.signal_filter.filter_signal(signal):
+                        filtered_signals.append(signal)
+                        self.signal_filter.update_recent_signals(signal)
+                        await self._notify_signal_subscribers(signal)
                 
                 # Notify general callback if provided
                 if callback:

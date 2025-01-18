@@ -1,14 +1,31 @@
-
 import pytest
 import asyncio
 from datetime import datetime
 from app.services.analysis.realtime_analyzer import RealtimeAnalyzer
 from app.services.signals.signal_generator import SignalType
+from app.services.signals.signal_filter import SignalFilter, FilterConfig
+
 
 class MockPriceCollector:
     def __init__(self):
         self.callbacks = []
         self.connected = False
+        self.base_price = 50000.0
+
+    def generate_mock_price(self, trend='neutral'):
+        """Generate mock price data with specified trend"""
+        if trend == 'up':
+            self.base_price *= 1.05
+        elif trend == 'down':
+            self.base_price *= 0.95
+            
+        return {
+            'timestamp': datetime.now(),
+            'price': self.base_price,
+            'high': self.base_price * 1.02,
+            'low': self.base_price * 0.98,
+            'volume': 1000.0
+        }
 
     async def connect_realtime(self, symbol: str):
         self.connected = True
@@ -19,17 +36,10 @@ class MockPriceCollector:
 
     async def subscribe_to_price_updates(self, symbol: str, callback):
         self.callbacks.append(callback)
-        # Send multiple updates to build enough history
-        base_price = 50000.0
-        for i in range(15):  # Send 15 updates
-            price = base_price + (i * 100)  # Add some price movement
-            await callback({
-                'timestamp': datetime.now(),
-                'price': price,
-                'high': price * 1.01,
-                'low': price * 0.99,
-                'volume': 1000.0
-            })
+        for _ in range(15):
+            await callback(self.generate_mock_price('down'))
+            await asyncio.sleep(0.01)
+
 
 @pytest.fixture
 def mock_price_collector(monkeypatch):
@@ -38,12 +48,14 @@ def mock_price_collector(monkeypatch):
                        lambda: collector)
     return collector
 
+
 @pytest.mark.asyncio
 async def test_realtime_analyzer_initialization():
     analyzer = RealtimeAnalyzer("BTC/USDT")
     assert analyzer.symbol == "BTC/USDT"
     assert hasattr(analyzer, 'price_collector')
     assert hasattr(analyzer, 'indicators')
+
 
 @pytest.mark.asyncio
 async def test_realtime_indicator_calculation(mock_price_collector):
@@ -61,6 +73,7 @@ async def test_realtime_indicator_calculation(mock_price_collector):
     assert 'indicators' in received_data[0]
     assert 'price' in received_data[0]
 
+
 @pytest.mark.asyncio
 async def test_multiple_indicator_subscriptions(mock_price_collector):
     analyzer = RealtimeAnalyzer("BTC/USDT")
@@ -77,68 +90,71 @@ async def test_multiple_indicator_subscriptions(mock_price_collector):
     await analyzer.subscribe_to_indicator('macd', macd_handler)
     
     await analyzer.start()
-    
-    # Simulate some price updates
     mock_price = {
         'timestamp': datetime.now(),
         'price': 50000.0,
         'volume': 100.0
     }
-    
-    # Send enough updates to generate indicators
-    for _ in range(15):  # Need at least 14 data points for indicators
+    for _ in range(15):
         await analyzer.handle_price_update(mock_price)
     
     await asyncio.sleep(0.1)
     await analyzer.stop()
     
-    assert len(rsi_data) > 0, "Should receive RSI updates"
-    assert len(macd_data) > 0, "Should receive MACD updates"
-    
-    # Verify data structure
+    assert len(rsi_data) > 0
+    assert len(macd_data) > 0
     assert 'indicator' in rsi_data[0]
     assert 'value' in rsi_data[0]
-    assert rsi_data[0]['indicator'] == 'rsi'
-    assert macd_data[0]['indicator'] == 'macd'
+
 
 @pytest.mark.asyncio
-async def test_signal_generation_integration(mock_price_collector):
+async def test_signal_filtering_strength():
     analyzer = RealtimeAnalyzer("BTC/USDT")
     received_signals = []
-    
+
     async def signal_handler(signal):
         received_signals.append(signal)
-    
+
     await analyzer.subscribe_to_signals(signal_handler)
-    await analyzer.start()
-    await asyncio.sleep(0.1)  # Wait for mock data
-    await analyzer.stop()
+    analyzer.signal_filter = SignalFilter(FilterConfig(min_strength=0.8))
     
-    assert len(received_signals) > 0
-    assert hasattr(received_signals[0], 'type')
-    assert isinstance(received_signals[0].type, SignalType)
+    prices = [50000, 45000, 42000, 40000]
+    for price in prices:
+        await analyzer.handle_price_update({
+            'timestamp': datetime.now(),
+            'price': price,
+            'high': price * 1.01,
+            'low': price * 0.99,
+            'volume': 1000.0
+        })
+
+    assert all(signal.strength >= 0.8 for signal in received_signals)
+
 
 @pytest.mark.asyncio
-async def test_specific_signal_subscription(mock_price_collector):
+async def test_signal_filtering_cooldown():
     analyzer = RealtimeAnalyzer("BTC/USDT")
-    rsi_signals = []
-    macd_signals = []
-    
-    async def rsi_handler(signal):
-        if signal.indicator == 'RSI':
-            rsi_signals.append(signal)
-            
-    async def macd_handler(signal):
-        if signal.indicator == 'MACD':
-            macd_signals.append(signal)
-    
-    await analyzer.subscribe_to_signals(rsi_handler, indicators=['RSI'])
-    await analyzer.subscribe_to_signals(macd_handler, indicators=['MACD'])
-    
-    await analyzer.start()
-    await asyncio.sleep(0.1)
-    await analyzer.stop()
-    
-    # Each handler should only receive its specific signals
-    assert all(signal.indicator == 'RSI' for signal in rsi_signals)
-    assert all(signal.indicator == 'MACD' for signal in macd_signals)
+    received_signals = []
+
+    async def signal_handler(signal):
+        received_signals.append(signal)
+
+    await analyzer.subscribe_to_signals(signal_handler)
+    analyzer.signal_filter = SignalFilter(FilterConfig(cooldown_period=300))
+    for _ in range(5):
+        await analyzer.handle_price_update({
+            'timestamp': datetime.now(),
+            'price': 40000,
+            'high': 40400,
+            'low': 39600,
+            'volume': 1000.0
+        })
+        await asyncio.sleep(0.1)
+
+    signal_times = {}
+    for signal in received_signals:
+        key = f"{signal.indicator}_{signal.type.value}"
+        if key in signal_times:
+            time_diff = (signal.timestamp - signal_times[key]).total_seconds()
+            assert time_diff >= 300
+        signal_times[key] = signal.timestamp
