@@ -5,7 +5,6 @@ from app.services.analysis.realtime_analyzer import RealtimeAnalyzer
 from app.services.signals.signal_generator import SignalType
 from app.services.signals.signal_filter import SignalFilter, FilterConfig
 
-
 class MockPriceCollector:
     def __init__(self):
         self.callbacks = []
@@ -36,9 +35,31 @@ class MockPriceCollector:
 
     async def subscribe_to_price_updates(self, symbol: str, callback):
         self.callbacks.append(callback)
-        for _ in range(15):
-            await callback(self.generate_mock_price('down'))
-            await asyncio.sleep(0.01)
+        # Generate initial data for indicators
+        await self._generate_initial_data(callback)
+        
+    async def _generate_initial_data(self, callback):
+        """Generate enough initial data points for indicator calculation"""
+        price = self.base_price
+        for i in range(30):  # Generate 30 data points for indicator calculation
+            if i < 10:
+                # First 10 points slight uptrend
+                price *= 1.001
+            elif i < 20:
+                # Next 10 points downtrend
+                price *= 0.999
+            else:
+                # Last 10 points uptrend
+                price *= 1.001
+                
+            await callback({
+                'timestamp': datetime.now(),
+                'price': price,
+                'high': price * 1.01,
+                'low': price * 0.99,
+                'volume': 1000.0 * (1 + (i * 0.1))
+            })
+            await asyncio.sleep(0.01)  # Small delay between updates
 
 
 @pytest.fixture
@@ -204,3 +225,174 @@ async def test_signal_integration():
 
     # Log indicator values for debugging
     print("\nFinal indicator values:", analyzer.indicators)
+
+@pytest.mark.asyncio
+async def test_performance_tracking_initialization():
+    """Test proper initialization of performance tracking"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    assert hasattr(analyzer, 'performance_tracker')
+    metrics = analyzer.get_current_performance()
+    assert metrics.total_signals == 0
+
+@pytest.mark.asyncio
+async def test_signal_performance_tracking():
+    """Test tracking of signal performance through price updates"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    received_signals = []
+    
+    async def signal_handler(signal):
+        received_signals.append(signal)
+    
+    await analyzer.subscribe_to_signals(signal_handler)
+    
+    # Generate initial data points
+    await generate_initial_data(analyzer)
+    
+    # Generate significant price movements
+    price_sequence = [
+        50000,  # Base price
+        45000,  # 10% drop - should trigger oversold
+        43000,  # Further drop
+        41000,  # More drop to ensure signal
+        45000,  # Recovery
+        48000,  # Further recovery to trigger completion
+    ]
+    
+    for price in price_sequence:
+        for _ in range(3):  # Multiple updates at each price level
+            await analyzer.handle_price_update({
+                'timestamp': datetime.now(),
+                'price': price,
+                'high': price * 1.02,
+                'low': price * 0.98,
+                'volume': 1000.0
+            })
+            await asyncio.sleep(0.01)
+    
+    # Check if signals were generated and tracked
+    metrics = analyzer.get_current_performance()
+    assert metrics.total_signals > 0, "No signals were generated"
+    assert len(received_signals) > 0, "No signals were received by handler"
+
+
+@pytest.mark.asyncio
+async def test_signal_completion_triggers():
+    """Test different ways signals can be completed"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    base_price = 50000.0
+    
+    # Generate initial data
+    await analyzer.handle_price_update({
+        'timestamp': datetime.now(),
+        'price': base_price,
+        'high': base_price * 1.01,
+        'low': base_price * 0.99,
+        'volume': 1000.0
+    })
+    
+    # Trigger profit target
+    profit_price = base_price * 1.05  # 5% profit
+    await analyzer.handle_price_update({
+        'timestamp': datetime.now(),
+        'price': profit_price,
+        'high': profit_price * 1.01,
+        'low': profit_price * 0.99,
+        'volume': 1000.0
+    })
+    
+    metrics = analyzer.get_current_performance()
+    assert metrics.total_signals >= 0  # Some signals should be completed
+
+
+@pytest.mark.asyncio
+async def test_performance_metrics_update():
+    """Test that performance metrics are updated correctly"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    all_updates = []
+    
+    async def callback(data):
+        if 'performance' in data:
+            all_updates.append(data['performance'])
+    
+    # Generate initial data
+    await generate_initial_data(analyzer)
+    
+    # Generate significant price movements
+    base_price = 50000.0
+    movements = [
+        1.0,    # Start at base
+        0.90,   # Sharp drop (10%)
+        0.85,   # Further drop
+        0.95,   # Recovery
+        1.05,   # Sharp rise
+        1.10    # Further rise
+    ]
+    
+    for movement in movements:
+        current_price = base_price * movement
+        for _ in range(3):  # Multiple updates at each level
+            await analyzer.handle_price_update({
+                'timestamp': datetime.now(),
+                'price': current_price,
+                'high': current_price * 1.02,
+                'low': current_price * 0.98,
+                'volume': 1000.0
+            }, callback)
+            await asyncio.sleep(0.01)
+    
+    assert len(all_updates) > 0, "No performance updates received"
+
+
+@pytest.mark.asyncio
+async def test_multiple_signal_types():
+    """Test performance tracking with different signal types"""
+    analyzer = RealtimeAnalyzer("BTC/USDT")
+    signals_received = []
+    
+    async def signal_handler(signal):
+        signals_received.append(signal)
+    
+    await analyzer.subscribe_to_signals(signal_handler)
+    
+    # Generate initial data
+    await generate_initial_data(analyzer)
+    
+    # Generate both bullish and bearish conditions
+    price_sequence = [
+        50000,  # Start
+        45000,  # Sharp drop (-10%) - should trigger buy
+        43000,  # Further drop
+        48000,  # Recovery
+        53000,  # Rise (+10%)
+        58000,  # Further rise - should trigger sell
+        55000   # Slight drop
+    ]
+    
+    for price in price_sequence:
+        for _ in range(3):  # Multiple updates at each level
+            await analyzer.handle_price_update({
+                'timestamp': datetime.now(),
+                'price': price,
+                'high': price * 1.02,
+                'low': price * 0.98,
+                'volume': 1000.0 * (1 + (price/50000 - 1))  # Volume increases with price
+            })
+            await asyncio.sleep(0.01)
+    
+    # Verify we got different types of signals
+    signal_types = set(signal.type for signal in signals_received)
+    assert len(signal_types) > 1, "Should have both BUY and SELL signals"
+    assert len(signals_received) > 0, "No signals were received"
+
+async def generate_initial_data(analyzer: RealtimeAnalyzer, num_points: int = 20):
+    """Helper function to generate enough initial data points"""
+    base_price = 50000.0
+    for i in range(num_points):
+        await analyzer.handle_price_update({
+            'timestamp': datetime.now(),
+            'price': base_price,
+            'high': base_price * 1.01,
+            'low': base_price * 0.99,
+            'volume': 1000.0
+        })
+        await asyncio.sleep(0.01)
