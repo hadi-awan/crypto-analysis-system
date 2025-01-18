@@ -152,34 +152,6 @@ class SignalGenerator:
         d = data['stoch_d'].iloc[-1]
         timestamp = data['timestamp'].iloc[-1]
 
-        # Oversold conditions (k and d below 20)
-        if k < 20 and d < 20:
-            strength = (20 - min(k, d)) / 20  # Higher strength when deeper oversold
-            return Signal(
-                type=SignalType.BUY,
-                indicator="STOCH",
-                strength=strength,
-                message=f"Stochastic Oversold: %K={k:.1f}, %D={d:.1f}",
-                timestamp=timestamp
-            )
-        # Overbought conditions (k and d above 80)
-        elif k > 80 and d > 80:
-            strength = (max(k, d) - 80) / 20
-            return Signal(
-                type=SignalType.SELL,
-                indicator="STOCH",
-                strength=strength,
-                message=f"Stochastic Overbought: %K={k:.1f}, %D={d:.1f}",
-                timestamp=timestamp
-            )
-        return None
-    
-    def _check_stochastic(self, data: pd.DataFrame) -> Optional[Signal]:
-        """Generate signals based on Stochastic Oscillator"""
-        k = data['stoch_k'].iloc[-1]
-        d = data['stoch_d'].iloc[-1]
-        timestamp = data['timestamp'].iloc[-1]
-
         # Oversold conditions (both K and D below 20)
         if k < 20 and d < 20:
             # Calculate strength based on how oversold it is
