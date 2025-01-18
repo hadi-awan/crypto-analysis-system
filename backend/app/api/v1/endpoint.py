@@ -65,7 +65,10 @@ async def websocket_endpoint(websocket: WebSocket, pair: str):
             price_data = await collector.get_current_price(normalized_pair)
             
             # Send the data to the client
-            await websocket.send_text(f"Real-time price data for {pair}: {price_data}")
+            await websocket.send_json({
+                "price": price_data["price"],  # Assuming price_data is a dict
+                "timestamp": datetime.now().isoformat()  # ISO 8601 string format
+            })
             
             # Sleep before sending the next update (adjust as needed)
             await asyncio.sleep(1)  # You can adjust the delay for updates as needed
