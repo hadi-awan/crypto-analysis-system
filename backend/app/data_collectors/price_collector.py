@@ -29,7 +29,8 @@ class CryptoPriceCollector:
         symbol: str,
         timeframe: str = '1h',
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
+        limit: int = 100  # Add limit here
     ) -> pd.DataFrame:
         """
         Fetch historical OHLCV data
@@ -50,7 +51,7 @@ class CryptoPriceCollector:
                 exchange_symbol,  # Use the normalized symbol
                 timeframe=timeframe,
                 since=since,
-                limit=1000  # Most exchanges limit to 1000 candles per request
+                limit=limit  # Respect the limit parameter
             )
 
             # Convert to DataFrame
@@ -189,3 +190,18 @@ class CryptoPriceCollector:
             except Exception as e:
                 self.logger.error(f"Error in WebSocket stream: {str(e)}")
                 await asyncio.sleep(1)
+
+    async def get_current_price(self, symbol: str) -> Dict:
+        """Get the current price for a symbol"""
+        try:
+            symbol = symbol.replace('/', '').upper()  # Normalize symbol format
+            ticker = self.exchange.fetch_ticker(symbol)  # Get current ticker info
+            price_data = {
+                'price': ticker['last'],  # Last trade price
+                'timestamp': datetime.now()
+            }
+            return price_data
+        except ccxt.ExchangeError as e:
+            if "symbol" in str(e).lower():
+                raise ValueError(f"Invalid symbol: {symbol}")
+            raise e

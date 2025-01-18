@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.auth import verify_token
+from app.api.v1.endpoint import router
 
 app = FastAPI()
+app.include_router(router)
 
 # CORS configuration
 app.add_middleware(
@@ -12,6 +14,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello World"}
 
 # Protected endpoint example
 @app.get("/api/performance/metrics")

@@ -29,3 +29,5 @@ celery==5.3.6
 
 # API documentation
 drf-yasg==1.21.7
+
+httpx==0.25.1
