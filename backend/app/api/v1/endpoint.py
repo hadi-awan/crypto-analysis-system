@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, HTTPException, Query, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -6,6 +6,7 @@ from app.shared.database import get_db
 from app.data_collectors.price_collector import CryptoPriceCollector
 from app.data_processors.technical_indicators import TechnicalAnalyzer
 from pydantic import BaseModel
+import asyncio
 
 router = APIRouter(prefix="/api/v1")
 
@@ -53,20 +54,29 @@ async def get_crypto_pairs():
     
 @router.websocket("/crypto/ws/{pair}")
 async def websocket_endpoint(websocket: WebSocket, pair: str):
-    """WebSocket endpoint for real-time price updates"""
     await websocket.accept()
-    collector = CryptoPriceCollector()
-    normalized_pair = pair.replace("-", "/").upper()
     
     try:
-        await collector.connect_realtime()
-        await collector.subscribe_to_price_updates(
-            normalized_pair,
-            lambda data: websocket.send_json(data)
-        )
+        collector = CryptoPriceCollector()  # Initialize your price collector here
+        normalized_pair = pair.replace("-", "/").upper()  # Normalize pair
+        
         while True:
-            await websocket.receive_text()  # Keep connection alive
+            # Fetch real-time price for the pair
+            price_data = await collector.get_current_price(normalized_pair)
+            
+            # Send the data to the client
+            await websocket.send_text(f"Real-time price data for {pair}: {price_data}")
+            
+            # Sleep before sending the next update (adjust as needed)
+            await asyncio.sleep(1)  # You can adjust the delay for updates as needed
+    
+    except WebSocketDisconnect:
+        print(f"Client disconnected from {pair} WebSocket")
+    
     except Exception as e:
+        print(f"Error occurred: {e}")
+    
+    finally:
         await websocket.close()
 
 @router.get("/crypto/historical/{pair}", response_model=HistoricalDataResponse)
