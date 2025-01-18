@@ -1,45 +1,22 @@
 from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
+from app.admin.jwt import jwt
 from typing import Optional
-from config import settings
+from app.core.config import get_settings
+
 
 security = HTTPBearer()
 
-async def verify_token(credentials: HTTPAuthorizationCredentials = security) -> dict:
+# Ensure get_settings() is correctly used to retrieve environment variables
+async def verify_token(credentials: HTTPAuthorizationCredentials):
+    settings = get_settings()  # Access settings explicitly here
+    secret_key = settings.JWT_SECRET_KEY
+
+    # Example of decoding the JWT (this is where the token is verified)
     try:
-        token = credentials.credentials
-        payload = jwt.decode(
-            token, 
-            settings.JWT_SECRET_KEY, 
-            algorithms=['HS256']
-        )
+        payload = jwt.decode(credentials.credentials, secret_key, algorithms=["HS256"])
         return payload
-    except jwt.PyJWTError:
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid authentication credentials"
-        )
-
-# api-service/main.py
-from fastapi import FastAPI, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from middleware.auth import verify_token
-
-app = FastAPI()
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Protected endpoint example
-@app.get("/api/performance/metrics")
-async def get_performance_metrics(user_data: dict = Depends(verify_token)):
-    user_id = user_data['user_id']
-    # Get metrics for specific user
-    return {"metrics": "data"}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
