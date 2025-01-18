@@ -1,8 +1,28 @@
-from typing import List
+from typing import List, Union
 from functools import lru_cache
-from pydantic import AnyHttpUrl, Field
+from pydantic import AnyHttpUrl, Field, BeforeValidator
+from typing_extensions import Annotated
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
+
+VALID_JWT_ALGORITHMS = ["HS256", "HS384", "HS512", "RS256", "RS384", "RS512"]
+
+def validate_jwt_algorithm(v: str) -> str:
+    if v not in VALID_JWT_ALGORITHMS:
+        raise ValueError(f"JWT_ALGORITHM must be one of {VALID_JWT_ALGORITHMS}")
+    return v
+
+def validate_jwt_expire_minutes(v: Union[str, int]) -> int:
+    # Convert string to int if necessary
+    if isinstance(v, str):
+        try:
+            v = int(v)
+        except ValueError:
+            raise ValueError("JWT_ACCESS_TOKEN_EXPIRE_MINUTES must be a valid integer")
+    
+    if v <= 0:
+        raise ValueError("JWT_ACCESS_TOKEN_EXPIRE_MINUTES must be positive")
+    return v
 
 class Settings(BaseSettings):
     # API Settings
@@ -18,6 +38,11 @@ class Settings(BaseSettings):
     # Exchange API Settings
     BINANCE_API_KEY: str
     BINANCE_SECRET_KEY: str
+
+    # JWT Settings
+    JWT_SECRET_KEY: str = Field(..., description="Secret key for JWT token generation")
+    JWT_ALGORITHM: Annotated[str, BeforeValidator(validate_jwt_algorithm)] = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: Annotated[int, BeforeValidator(validate_jwt_expire_minutes)] = 60 * 24
 
     model_config = SettingsConfigDict(
         env_file='.env',

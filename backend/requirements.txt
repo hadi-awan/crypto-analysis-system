@@ -1,3 +1,4 @@
+# Core API packages
 fastapi==0.104.1
 uvicorn==0.24.0
 ccxt==4.1.13
@@ -9,3 +10,22 @@ pydantic-settings==2.1.0
 pytest==7.4.3
 pytest-asyncio==0.21.1
 websockets==12.0
+
+# Django and related packages
+django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+
+# Authentication
+PyJWT==2.8.0
+
+# Database
+SQLAlchemy==2.0.25
+alembic==1.13.1
+
+# Cache and Queue
+redis==5.0.1
+celery==5.3.6
+
+# API documentation
+drf-yasg==1.21.7
