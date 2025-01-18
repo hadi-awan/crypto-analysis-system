@@ -1,11 +1,15 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 
-SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost/dbname"
+# Use SQLite for testing
+SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///./test.db"
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+test_engine = create_engine(
+    SQLALCHEMY_TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False}  # Needed for SQLite
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 Base = declarative_base()
 
@@ -17,14 +21,10 @@ def get_db():
     finally:
         db.close()
 
-# Django settings.py
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'dbname',
-        'USER': 'user',
-        'PASSWORD': 'password',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
+# Override the database dependency for testing
+def override_get_db():
+    try:
+        db = SessionLocal()
+        yield db
+    finally:
+        db.close()

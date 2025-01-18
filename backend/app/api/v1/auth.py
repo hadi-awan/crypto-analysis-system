@@ -2,7 +2,7 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.admin.jwt import jwt
 from typing import Optional
-from app.core.config import get_settings
+from app.config.config import get_settings
 
 
 security = HTTPBearer()

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 import jwt
-from app.core.config import get_settings
+from app.config.config import get_settings
 
 class JWTAuth:
     def __init__(self, secret_key: str = None):

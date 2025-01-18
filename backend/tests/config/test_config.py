@@ -1,5 +1,5 @@
 import pytest
-from app.core.config import Settings
+from app.config.config import Settings
 from pydantic import AnyHttpUrl, ValidationError
 
 def test_settings_with_env_vars(monkeypatch):
