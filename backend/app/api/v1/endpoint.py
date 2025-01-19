@@ -57,28 +57,39 @@ async def websocket_endpoint(websocket: WebSocket, pair: str):
     await websocket.accept()
     
     try:
-        collector = CryptoPriceCollector()  # Initialize your price collector here
-        normalized_pair = pair.replace("-", "/").upper()  # Normalize pair
+        collector = CryptoPriceCollector()
+        normalized_pair = pair.replace("-", "/").upper()
+        
+        last_price = None
         
         while True:
-            # Fetch real-time price for the pair
-            price_data = await collector.get_current_price(normalized_pair)
+            # Get current price
+            current_price = await collector.get_current_price(normalized_pair)
             
-            # Send the data to the client
-            await websocket.send_json({
-                "price": price_data["price"],  # Assuming price_data is a dict
-                "timestamp": datetime.now().isoformat()  # ISO 8601 string format
-            })
+            # Calculate price change
+            if last_price:
+                price_change = ((current_price['price'] - last_price) / last_price) * 100
+            else:
+                price_change = 0
             
-            # Sleep before sending the next update (adjust as needed)
-            await asyncio.sleep(1)  # You can adjust the delay for updates as needed
-    
+            # Create response with properly formatted timestamp
+            response_data = {
+                "price": current_price['price'],
+                "timestamp": current_price['timestamp'].isoformat(),  # Convert datetime to ISO string
+                "priceChange24h": price_change
+            }
+                
+            await websocket.send_json(response_data)
+            
+            last_price = current_price['price']
+            await asyncio.sleep(1)
+            
     except WebSocketDisconnect:
         print(f"Client disconnected from {pair} WebSocket")
-    
+        
     except Exception as e:
         print(f"Error occurred: {e}")
-    
+        
     finally:
         await websocket.close()
 
