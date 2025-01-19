@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -96,8 +97,7 @@ async def websocket_endpoint(websocket: WebSocket, pair: str):
 @router.get("/crypto/historical/{pair}", response_model=HistoricalDataResponse)
 async def get_historical_data(
     pair: str,
-    timeframe: str = Query("1h", regex="^(1m|5m|15m|1h|4h|1d)$"),
-    limit: int = Query(100, ge=1, le=1000)
+    timeframe: str,
 ):
     """Get historical price data"""
     try:
@@ -105,8 +105,7 @@ async def get_historical_data(
         normalized_pair = pair.replace("-", "/").upper()
         data = collector.fetch_historical_data(
             normalized_pair,
-            timeframe=timeframe,
-            limit=limit
+            timeframe=timeframe
         )
 
         data = data.to_dict(orient='records')

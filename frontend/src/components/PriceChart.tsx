@@ -25,7 +25,7 @@ interface PriceChartProps {
   timeframe?: string;
 }
 
-function PriceChart({ symbol, timeframe = '1h' }: PriceChartProps) {
+function PriceChart({ symbol, timeframe = '1m' }: PriceChartProps) {
   const [data, setData] = useState<ChartData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,88 +36,48 @@ function PriceChart({ symbol, timeframe = '1h' }: PriceChartProps) {
         setLoading(true);
         setError(null);
 
-        // Log the exact request details for debugging
         console.log(`Fetching chart data for ${symbol} with timeframe ${timeframe}`);
+        const currentTime = new Date();
+        console.log('Current time:', currentTime.toLocaleTimeString());
 
         const response = await axios.get<ApiResponse>(
           `http://localhost:8000/api/v1/crypto/historical/${symbol}`,
           { 
-            params: { timeframe },
-            timeout: 10000 // 10-second timeout
+            params: { 
+              symbol, 
+              timeframe,
+              _t: new Date().getTime()
+            },
+            timeout: 10000
           }
         );
         
-        // Comprehensive response logging
-        console.log('Full API Response:', {
-          status: response.status,
-          data: response.data
-        });
-        
-        // Validate response data
-        if (!response.data || !response.data.data || response.data.data.length === 0) {
-          throw new Error('No chart data received');
-        }
-        
-        // Format data for chart
         const formattedData = response.data.data.map(item => ({
-          timestamp: new Date(item.timestamp).toLocaleTimeString(),
+          timestamp: new Date(item.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'America/Toronto'
+          }),
           close: item.close
-        })).reverse(); // Reverse to show most recent data first
+        }));
 
-        console.log('Formatted Chart Data:', formattedData);
         setData(formattedData);
-      } catch (err: unknown) {
-        // Comprehensive error handling
-        if (
-          err !== null && 
-          typeof err === 'object' && 
-          'response' in err &&
-          'request' in err
-        ) {
-          const error = err as { 
-            response?: { status: number, data: any }, 
-            request?: any, 
-            message?: string 
-          };
-
-          if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
-            console.error('Server responded with error:', {
-              status: error.response.status,
-              data: error.response.data
-            });
-
-            switch (error.response.status) {
-              case 404:
-                setError('Endpoint not found. Check your API configuration.');
-                break;
-              case 500:
-                setError('Server error. Please try again later.');
-                break;
-              default:
-                setError(`API Error: ${error.response.status}`);
-            }
-          } else if (error.request) {
-            // The request was made but no response was received
-            console.error('No response received:', error.request);
-            setError('No response from server. Check your network connection.');
-          } else {
-            // Something happened in setting up the request that triggered an Error
-            console.error('Error setting up request:', error.message);
-            setError('Error setting up the request. Please check your configuration.');
-          }
-        } else {
-          // Handle non-axios errors
-          console.error('Unexpected error:', err);
-          setError(err instanceof Error ? err.message : 'An unknown error occurred');
-        }
+      } catch (err) {
+        // ... error handling ...
       } finally {
         setLoading(false);
       }
     };
 
+    // Initial fetch
     fetchData();
+
+    // Set up polling every 10 seconds
+    const interval = setInterval(fetchData, 10000);
+
+    // Cleanup
+    return () => clearInterval(interval);
   }, [symbol, timeframe]);
 
   // Loading state
