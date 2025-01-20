@@ -34,12 +34,16 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
   useEffect(() => {
     const fetchInitialPrice = async () => {
       try {
-        const response = await axios.get(`http://localhost:8000/api/v1/crypto/price/${symbol}`);
+        const response = await axios.get<{price: number, timestamp: string}>(
+          `http://localhost:8000/api/v1/crypto/price/${symbol}`
+        );
+        
         const initialPriceData = {
           price: response.data.price,
           timestamp: response.data.timestamp,
           changePercent: 0
         };
+        
         setPrice(initialPriceData);
         setIsConnecting(false);
       } catch (error) {
@@ -48,7 +52,7 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
         setIsConnecting(false);
       }
     };
-
+  
     fetchInitialPrice();
   }, [symbol]);
 
