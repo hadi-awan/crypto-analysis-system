@@ -1,13 +1,15 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime
 from app.shared.database import get_db
 from app.data_collectors.price_collector import CryptoPriceCollector
 from app.data_processors.technical_indicators import TechnicalAnalyzer
 from pydantic import BaseModel
 import asyncio
+import ccxt
+import re
 
 router = APIRouter(prefix="/api/v1")
 
@@ -47,11 +49,95 @@ async def get_crypto_price(pair: str):
             detail=f"Crypto pair {pair} not found"
         )
 
+def normalize_symbol(symbol: str) -> str:
+    """
+    Normalize symbol for consistent matching
+    - Remove any non-alphanumeric characters
+    - Convert to uppercase
+    """
+    return re.sub(r'[^A-Z0-9]', '', symbol.upper())
+
 @router.get("/crypto/pairs")
-async def get_crypto_pairs():
-    """Get available crypto pairs"""
-    pairs = ["BTC/USDT", "ETH/USDT", "BTC/EUR"]  # Example pairs, you can modify as needed
-    return {"pairs": pairs}
+async def get_crypto_pairs(
+    search: Optional[str] = Query(None),
+    quote_currencies: Optional[Union[List[str], str]] = Query(default=["USDT", "BTC", "ETH", "BNB"]),
+    exchange: str = Query("binance", description="Exchange to fetch pairs from")
+):
+    """
+    Dynamically fetch all available trading pairs from a specified exchange
+    
+    Parameters:
+    - search: Optional search term to filter pairs
+    - quote_currencies: List of quote currencies to filter
+    - exchange: Exchange to fetch pairs from (default: Binance)
+    """
+    try:
+        # Ensure quote_currencies is a list
+        if isinstance(quote_currencies, str):
+            quote_currencies = [quote_currencies]
+        
+        # Normalize quote currencies
+        quote_currencies = [curr.upper() for curr in quote_currencies]
+        
+        # Initialize the exchange
+        exchange_class = getattr(ccxt, exchange.lower(), None)
+        if not exchange_class:
+            return {"error": f"Exchange {exchange} not supported", "pairs": []}
+        
+        # Create exchange instance
+        ex = exchange_class({
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot'  # Focus on spot markets
+            }
+        })
+        
+        # Load markets
+        await asyncio.to_thread(ex.load_markets)
+        
+        # Filter pairs
+        all_pairs = []
+        for symbol, market in ex.markets.items():
+            # Check if it's a spot market and has allowed quote currency
+            if (market['type'] == 'spot' and 
+                market['quote'] in quote_currencies and 
+                market['active']):
+                pair_info = {
+                    'symbol': symbol,
+                    'base': market['base'],
+                    'quote': market['quote'],
+                    'category': market.get('category', 'Spot'),
+                    'keywords': [market['base'].lower(), market['quote'].lower()]
+                }
+                all_pairs.append(pair_info)
+        
+        # Search filtering if search term is provided
+        if search:
+            # Normalize search term
+            search_norm = normalize_symbol(search)
+            
+            # Filter pairs
+            all_pairs = [
+                pair for pair in all_pairs
+                if (search_norm in normalize_symbol(pair['symbol']) or
+                    search_norm in normalize_symbol(pair['base']) or
+                    search_norm in normalize_symbol(pair['quote']) or
+                    any(search_norm in normalize_symbol(keyword) for keyword in pair.get('keywords', [])))
+            ]
+        
+        # Sort pairs by symbol
+        all_pairs.sort(key=lambda x: x['symbol'])
+        
+        return {
+            "total_pairs": len(all_pairs),
+            "pairs": all_pairs
+        }
+    
+    except Exception as e:
+        return {
+            "error": f"Error fetching pairs: {str(e)}",
+            "pairs": []
+        }
     
 @router.websocket("/crypto/ws/{pair}")
 async def websocket_endpoint(websocket: WebSocket, pair: str):
@@ -134,22 +220,34 @@ async def get_historical_data(
         )
     
 @router.get("/crypto/indicators/{pair}")
-async def get_indicators(
+def get_indicators(
     pair: str,
-    indicators: str = Query(..., description="Comma-separated list of indicators")
+    indicators: str = Query(..., description="Comma-separated list of indicators"),
+    timeframe: str = Query("1h", regex="^(1h|4h|1d)$")  # Added timeframe parameter
 ):
     """Get technical indicators for a crypto pair"""
     try:
+        print(f"Calculating indicators for {pair}, indicators requested: {indicators}")
+        
         collector = CryptoPriceCollector()
         normalized_pair = pair.replace("-", "/").upper()
         
-        # Get historical data for indicator calculation
-        data = collector.fetch_historical_data(normalized_pair)
+        print(f"Fetching historical data for {normalized_pair} with timeframe {timeframe}")
+        data = collector.fetch_historical_data(
+            symbol=normalized_pair,
+            timeframe=timeframe
+        )
+        
+        if data is None or len(data) == 0:
+            raise ValueError(f"No historical data available for {normalized_pair}")
+            
+        print(f"Data fetched, length: {len(data)}")
         analyzer = TechnicalAnalyzer(data)
         
         # Calculate requested indicators
         result = {}
         indicator_list = [i.strip().lower() for i in indicators.split(",")]
+        print(f"Calculating indicators: {indicator_list}")
         
         if "rsi" in indicator_list:
             result["rsi"] = float(analyzer.calculate_rsi().iloc[-1])
@@ -162,10 +260,26 @@ async def get_indicators(
                 "histogram": float(hist.iloc[-1])
             }
             
+        if "bb" in indicator_list:
+            upper, middle, lower = analyzer.calculate_bollinger_bands()
+            result["bb"] = {
+                "upper": float(upper.iloc[-1]),
+                "middle": float(middle.iloc[-1]),
+                "lower": float(lower.iloc[-1])
+            }
+            
+        print(f"Calculated indicators: {result}")
         return result
         
     except ValueError as e:
+        print(f"ValueError in indicator calculation: {str(e)}")
         raise HTTPException(
             status_code=400,
             detail=str(e)
+        )
+    except Exception as e:
+        print(f"Unexpected error in indicator calculation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while calculating indicators: {str(e)}"
         )

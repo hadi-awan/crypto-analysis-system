@@ -9,7 +9,17 @@ interface PriceData {
   changePercent?: number;
 }
 
-function PriceDisplay({ symbol = 'BTC-USDT' }) {
+interface PriceDisplayProps {
+  symbol?: string;
+  onSelect?: () => void;
+  isSelected?: boolean;
+}
+
+function PriceDisplay({ 
+  symbol = 'BTC-USDT', 
+  onSelect, 
+  isSelected = false 
+}: PriceDisplayProps) {
   const [price, setPrice] = useState<PriceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -92,7 +102,16 @@ function PriceDisplay({ symbol = 'BTC-USDT' }) {
   }, [symbol]);
 
   return (
-    <div className="bg-white rounded-lg p-6 shadow-lg">
+    <div 
+      className={`
+        bg-white rounded-lg p-6 shadow-lg cursor-pointer
+        transition-all duration-300 ease-in-out
+        ${isSelected 
+          ? 'ring-4 ring-blue-500 ring-opacity-50 transform scale-105' 
+          : 'hover:bg-gray-50 hover:shadow-xl'}
+      `}
+      onClick={onSelect}
+    >
       <h2 className="text-xl font-semibold mb-4">{symbol} Price</h2>
       {price ? (
         <div className="space-y-2">
