@@ -24,13 +24,30 @@ class CryptoPriceCollector:
         return self.supported_timeframes
     
     def fetch_historical_data(self, symbol: str, timeframe: str = '1m') -> pd.DataFrame:
-        exchange_symbol = symbol.replace('/', '').upper()
+        """
+        Fetch historical price data for a given symbol and timeframe.
+        
+        For timeframe:
+        - 1h: fetch 1-minute candles for the last hour (60 candles)
+        - 4h: fetch 5-minute candles for the last 4 hours (48 candles)
+        - 1d: fetch 15-minute candles for the last day (96 candles)
+        """
+        timeframe_settings = {
+            '1h': {'interval': '1m', 'limit': 60},    # 1 min candles for 1 hour
+            '4h': {'interval': '5m', 'limit': 48},    # 5 min candles for 4 hours
+            '1d': {'interval': '15m', 'limit': 96},   # 15 min candles for 1 day
+        }
+        
+        if timeframe not in timeframe_settings:
+            raise ValueError(f"Unsupported timeframe. Must be one of: {', '.join(timeframe_settings.keys())}")
             
-        # Get the most recent data only
+        exchange_symbol = symbol.replace('/', '').upper()
+        settings = timeframe_settings[timeframe]
+        
         ohlcv = self.exchange.fetch_ohlcv(
             exchange_symbol,
-            timeframe='1m',
-            limit=60  # Last 60 points
+            timeframe=settings['interval'],
+            limit=settings['limit']
         )
 
         df = pd.DataFrame(
@@ -42,7 +59,7 @@ class CryptoPriceCollector:
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('America/Toronto')
             
         return df
-            
+                
 
     async def connect_realtime(self, symbol: Optional[str] = None) -> bool:
         """Connect to exchange websocket for real-time data"""
