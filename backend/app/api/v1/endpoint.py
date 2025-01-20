@@ -10,6 +10,30 @@ from pydantic import BaseModel
 import asyncio
 import ccxt
 import re
+from functools import lru_cache
+from datetime import datetime, timedelta
+
+class DataCache:
+    def __init__(self, max_age_seconds=30):
+        self._cache = {}
+        self._max_age = max_age_seconds
+
+    def get(self, key):
+        """Retrieve cached data if not expired"""
+        cached = self._cache.get(key)
+        if cached and (datetime.now() - cached['timestamp']).total_seconds() < self._max_age:
+            return cached['data']
+        return None
+
+    def set(self, key, data):
+        """Store data in cache"""
+        self._cache[key] = {
+            'data': data,
+            'timestamp': datetime.now()
+        }
+
+# Global cache instance
+data_cache = DataCache()
 
 router = APIRouter(prefix="/api/v1")
 
@@ -148,27 +172,37 @@ async def websocket_endpoint(websocket: WebSocket, pair: str):
         normalized_pair = pair.replace("-", "/").upper()
         
         last_price = None
+        last_update_time = datetime.now()
         
         while True:
+            current_time = datetime.now()
+
             # Get current price
             current_price = await collector.get_current_price(normalized_pair)
+
+            # Only fetch new data every 10 seconds
+            if (current_time - last_update_time).total_seconds() >= 10:
+                current_price = await collector.get_current_price(normalized_pair)
             
-            # Calculate price change
-            if last_price:
-                price_change = ((current_price['price'] - last_price) / last_price) * 100
-            else:
-                price_change = 0
+                # Calculate price change
+                if last_price:
+                    price_change = ((current_price['price'] - last_price) / last_price) * 100
+                else:
+                    price_change = 0
             
-            # Create response with properly formatted timestamp
-            response_data = {
-                "price": current_price['price'],
-                "timestamp": current_price['timestamp'].isoformat(),  # Convert datetime to ISO string
-                "priceChange24h": price_change
-            }
+                # Create response with properly formatted timestamp
+                response_data = {
+                    "price": current_price['price'],
+                    "timestamp": current_price['timestamp'].isoformat(),  # Convert datetime to ISO string
+                    "priceChange24h": price_change
+                }
                 
-            await websocket.send_json(response_data)
+                await websocket.send_json(response_data)
             
-            last_price = current_price['price']
+                last_price = current_price['price']
+                last_update_time = current_time
+            
+            # Reduce CPU usage
             await asyncio.sleep(1)
             
     except WebSocketDisconnect:
@@ -185,6 +219,14 @@ async def get_historical_data(
     pair: str,
     timeframe: str,
 ):
+    """Get historical price data with caching"""
+    cache_key = f"{pair}_{timeframe}"
+    
+    # Try to get cached data
+    cached_data = data_cache.get(cache_key)
+    if cached_data:
+        return cached_data
+
     """Get historical price data"""
     try:
         collector = CryptoPriceCollector()
@@ -207,12 +249,17 @@ async def get_historical_data(
                 volume=entry['volume']
             ) for entry in data
         ]
-        
-        return {
+
+        result = {
             "pair": normalized_pair,
             "timeframe": timeframe,
             "data": formatted_data
         }
+
+        # Cache the result
+        data_cache.set(cache_key, result)
+
+        return result
     except ValueError as e:
         raise HTTPException(
             status_code=400,
@@ -220,13 +267,21 @@ async def get_historical_data(
         )
     
 @router.get("/crypto/indicators/{pair}")
-def get_indicators(
+async def get_indicators(
     pair: str,
     indicators: str = Query(..., description="Comma-separated list of indicators"),
-    timeframe: str = Query("1h", regex="^(1h|4h|1d)$")  # Added timeframe parameter
+    timeframe: str = Query("1h", regex="^(1h|4h|1d)$")
 ):
-    """Get technical indicators for a crypto pair"""
+    """Get technical indicators for a crypto pair with caching"""
     try:
+        # Create a unique cache key based on pair, indicators, and timeframe
+        cache_key = f"{pair}_{indicators}_{timeframe}"
+        
+        # Try to get cached data
+        cached_result = data_cache.get(cache_key)
+        if cached_result:
+            return cached_result
+
         print(f"Calculating indicators for {pair}, indicators requested: {indicators}")
         
         collector = CryptoPriceCollector()
@@ -269,6 +324,10 @@ def get_indicators(
             }
             
         print(f"Calculated indicators: {result}")
+        
+        # Cache the result
+        data_cache.set(cache_key, result)
+        
         return result
         
     except ValueError as e:

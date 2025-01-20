@@ -51,16 +51,15 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<TimeframeOption['value']>(initialTimeframe);
+  
+  // Store previous data to show while loading
+  const [previousData, setPreviousData] = useState<ChartData[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-
-        console.log(`Fetching chart data for ${symbol} with timeframe ${timeframe}`);
-        const currentTime = new Date();
-        console.log('Current time:', currentTime.toLocaleTimeString());
 
         const response = await axios.get<ApiResponse>(
           `http://localhost:8000/api/v1/crypto/historical/${symbol}`,
@@ -70,7 +69,7 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
               timeframe,
               _t: new Date().getTime()
             },
-            timeout: 10000
+            timeout: 10000 // Increased timeout
           }
         );
         
@@ -84,8 +83,15 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
           close: item.close
         }));
 
+        // Store current data as previous before updating
+        setPreviousData(data);
         setData(formattedData);
       } catch (err) {
+        // Use previous data if available
+        if (previousData.length > 0) {
+          setData(previousData);
+        }
+        
         const error = err as Error | AxiosError;
         setError(error.message || 'Failed to fetch chart data');
       } finally {
@@ -102,6 +108,9 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
     // Cleanup
     return () => clearInterval(interval);
   }, [symbol, timeframe]);
+
+    // Render using data or previousData
+    const displayData = data.length > 0 ? data : previousData;
 
   // Loading state
   if (loading) {
