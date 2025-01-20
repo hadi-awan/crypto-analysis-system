@@ -11,15 +11,9 @@ interface PriceData {
 
 interface PriceDisplayProps {
   symbol?: string;
-  onSelect?: () => void;
-  isSelected?: boolean;
 }
 
-function PriceDisplay({ 
-  symbol = 'BTC-USDT', 
-  onSelect, 
-  isSelected = false 
-}: PriceDisplayProps) {
+function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
   const [price, setPrice] = useState<PriceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -36,17 +30,41 @@ function PriceDisplay({
     return `${sign}${change.toFixed(2)}%`;
   };
 
+  // Fetch initial price before WebSocket connection
+  useEffect(() => {
+    const fetchInitialPrice = async () => {
+      try {
+        const response = await axios.get(`http://localhost:8000/api/v1/crypto/price/${symbol}`);
+        const initialPriceData = {
+          price: response.data.price,
+          timestamp: response.data.timestamp,
+          changePercent: 0
+        };
+        setPrice(initialPriceData);
+        setIsConnecting(false);
+      } catch (error) {
+        console.error('Error fetching initial price:', error);
+        setError('Failed to fetch initial price');
+        setIsConnecting(false);
+      }
+    };
+
+    fetchInitialPrice();
+  }, [symbol]);
+
   useEffect(() => {
     let ws: WebSocket;
+    let reconnectTimeout: NodeJS.Timeout;
 
     const connectWebSocket = () => {
       setIsConnecting(true);
+      setError(null);
+
       ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/crypto/ws/${symbol}`);
 
       ws.onopen = () => {
         console.log('WebSocket Connected');
         setIsConnecting(false);
-        setError(null);
       };
 
       ws.onmessage = (event) => {
@@ -76,7 +94,7 @@ function PriceDisplay({
             });
           }
         } catch (e) {
-          console.error('Error parsing data:', e);
+          console.error('Error parsing WebSocket data:', e);
         }
       };
 
@@ -88,7 +106,8 @@ function PriceDisplay({
 
       ws.onclose = () => {
         console.log('WebSocket disconnected, attempting to reconnect...');
-        setTimeout(connectWebSocket, 3000);
+        setIsConnecting(true);
+        reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
     };
 
@@ -98,20 +117,55 @@ function PriceDisplay({
       if (ws) {
         ws.close();
       }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
     };
   }, [symbol]);
 
+  // Loading or error state
+  if (isConnecting && !price) {
+    return (
+      <div className="bg-white rounded-lg p-6 shadow-lg">
+        <h2 className="text-xl font-semibold mb-4">{symbol} Price</h2>
+        <div className="text-gray-500 flex items-center justify-center">
+          <svg 
+            className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-500" 
+            xmlns="http://www.w3.org/2000/svg" 
+            fill="none" 
+            viewBox="0 0 24 24"
+          >
+            <circle 
+              className="opacity-25" 
+              cx="12" 
+              cy="12" 
+              r="10" 
+              stroke="currentColor" 
+              strokeWidth="4"
+            ></circle>
+            <path 
+              className="opacity-75" 
+              fill="currentColor" 
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          Connecting to market data...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-lg p-6 shadow-lg">
+        <h2 className="text-xl font-semibold mb-4">{symbol} Price</h2>
+        <div className="text-red-500">{error}</div>
+      </div>
+    );
+  }
+
   return (
-    <div 
-      className={`
-        bg-white rounded-lg p-6 shadow-lg cursor-pointer
-        transition-all duration-300 ease-in-out
-        ${isSelected 
-          ? 'ring-4 ring-blue-500 ring-opacity-50 transform scale-105' 
-          : 'hover:bg-gray-50 hover:shadow-xl'}
-      `}
-      onClick={onSelect}
-    >
+    <div className="bg-white rounded-lg p-6 shadow-lg">
       <h2 className="text-xl font-semibold mb-4">{symbol} Price</h2>
       {price ? (
         <div className="space-y-2">
@@ -132,7 +186,7 @@ function PriceDisplay({
           </div>
         </div>
       ) : (
-        <div className="text-gray-500">Waiting for price updates...</div>
+        <div className="text-gray-500">Unable to fetch price data</div>
       )}
     </div>
   );
