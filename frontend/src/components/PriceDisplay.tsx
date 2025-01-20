@@ -4,12 +4,32 @@ import axios from 'axios';
 interface PriceData {
   price: number;
   timestamp: string;
-  openPrice?: number;
-  dailyChange?: number;
+  openPrice: number | null;
+  dailyChange: number | null;
 }
 
 interface PriceDisplayProps {
   symbol?: string;
+}
+
+interface HistoricalDataPoint {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+interface HistoricalDataResponse {
+  pair: string;
+  timeframe: string;
+  data: HistoricalDataPoint[];
+}
+
+interface CurrentPriceResponse {
+  price: number;
+  timestamp: string;
 }
 
 function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
@@ -21,7 +41,7 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
   // Get daily opening price
   const fetchOpenPrice = async () => {
     try {
-      const response = await axios.get(
+      const response = await axios.get<HistoricalDataResponse>(
         `http://localhost:8000/api/v1/crypto/historical/${symbol}`,
         {
           params: {
@@ -60,7 +80,7 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
         openPrice = await fetchOpenPrice();
         
         // Fetch current price
-        const response = await axios.get<{price: number, timestamp: string}>(
+        const response = await axios.get<CurrentPriceResponse>(
           `http://localhost:8000/api/v1/crypto/price/${symbol}`
         );
         
@@ -68,11 +88,11 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
           ((response.data.price - openPrice) / openPrice) * 100 : 
           0;
 
-        const initialPriceData = {
+        const initialPriceData: PriceData = {
           price: response.data.price,
           timestamp: response.data.timestamp,
-          openPrice,
-          dailyChange
+          openPrice: openPrice,
+          dailyChange: dailyChange
         };
         
         setPrice(initialPriceData);
@@ -96,7 +116,7 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
 
       newWs.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(event.data) as CurrentPriceResponse;
           if (typeof data.price === 'number' && typeof data.timestamp === 'string') {
             setPrice(prev => {
               const dailyChange = openPrice ? 
@@ -106,9 +126,9 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
               return {
                 price: data.price,
                 timestamp: data.timestamp,
-                openPrice,
-                dailyChange
-              };
+                openPrice: openPrice,
+                dailyChange: dailyChange
+              } as PriceData;
             });
           }
         } catch (e) {
@@ -190,7 +210,7 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
               maximumFractionDigits: 2,
             })}
           </div>
-          {price.dailyChange !== undefined && (
+          {price.dailyChange !== null && (
             <div className={`text-sm font-medium ${getPriceChangeClass(price.dailyChange)}`}>
               {formatPriceChange(price.dailyChange)}
               <span className="text-gray-500 ml-1">today</span>
