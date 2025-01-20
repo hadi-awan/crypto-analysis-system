@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 interface PriceData {
   price: number;
   timestamp: string;
-  lastSignificantPrice?: number;
-  lastSignificantTime?: string;
-  changePercent?: number;
+  openPrice?: number;
+  dailyChange?: number;
 }
 
 interface PriceDisplayProps {
@@ -17,8 +16,29 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
   const [price, setPrice] = useState<PriceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
-  const SIGNIFICANT_UPDATE_INTERVAL = 60000; // 1 minute in milliseconds
+  // Get daily opening price
+  const fetchOpenPrice = async () => {
+    try {
+      const response = await axios.get(
+        `http://localhost:8000/api/v1/crypto/historical/${symbol}`,
+        {
+          params: {
+            timeframe: '1d'  // Get daily data
+          }
+        }
+      );
+      
+      if (response.data.data && response.data.data.length > 0) {
+        return response.data.data[0].open; // Get today's opening price
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching opening price:', error);
+      return null;
+    }
+  };
 
   const getPriceChangeClass = (change: number) => {
     if (change === 0) return 'text-gray-500';
@@ -30,70 +50,64 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
     return `${sign}${change.toFixed(2)}%`;
   };
 
-  // Fetch initial price before WebSocket connection
+  // Fetch initial price and set up WebSocket
   useEffect(() => {
-    const fetchInitialPrice = async () => {
+    let openPrice: number | null = null;
+
+    const initialize = async () => {
       try {
+        // Fetch opening price first
+        openPrice = await fetchOpenPrice();
+        
+        // Fetch current price
         const response = await axios.get<{price: number, timestamp: string}>(
           `http://localhost:8000/api/v1/crypto/price/${symbol}`
         );
         
+        const dailyChange = openPrice ? 
+          ((response.data.price - openPrice) / openPrice) * 100 : 
+          0;
+
         const initialPriceData = {
           price: response.data.price,
           timestamp: response.data.timestamp,
-          changePercent: 0
+          openPrice,
+          dailyChange
         };
         
         setPrice(initialPriceData);
         setIsConnecting(false);
       } catch (error) {
-        console.error('Error fetching initial price:', error);
+        console.error('Error fetching initial data:', error);
         setError('Failed to fetch initial price');
         setIsConnecting(false);
       }
     };
-  
-    fetchInitialPrice();
-  }, [symbol]);
 
-  useEffect(() => {
-    let ws: WebSocket;
-    let reconnectTimeout: NodeJS.Timeout;
-
+    // Set up WebSocket connection
     const connectWebSocket = () => {
-      setIsConnecting(true);
-      setError(null);
+      const wsUrl = `ws://127.0.0.1:8000/api/v1/crypto/ws/${symbol}`;
+      const newWs = new WebSocket(wsUrl);
 
-      ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/crypto/ws/${symbol}`);
-
-      ws.onopen = () => {
+      newWs.onopen = () => {
         console.log('WebSocket Connected');
-        setIsConnecting(false);
+        setError(null);
       };
 
-      ws.onmessage = (event) => {
+      newWs.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           if (typeof data.price === 'number' && typeof data.timestamp === 'string') {
             setPrice(prev => {
-              const now = new Date().getTime();
-              const lastSignificantTime = new Date(prev?.lastSignificantTime || 0).getTime();
-              
-              const shouldUpdateReference = 
-                !prev || 
-                (prev.price !== data.price && 
-                (now - lastSignificantTime >= SIGNIFICANT_UPDATE_INTERVAL));
-
-              const changePercent = prev?.lastSignificantPrice 
-                ? ((data.price - prev.lastSignificantPrice) / prev.lastSignificantPrice) * 100 
-                : 0;
+              const dailyChange = openPrice ? 
+                ((data.price - openPrice) / openPrice) * 100 : 
+                0;
 
               return {
                 price: data.price,
                 timestamp: data.timestamp,
-                lastSignificantPrice: shouldUpdateReference ? data.price : prev?.lastSignificantPrice,
-                lastSignificantTime: shouldUpdateReference ? data.timestamp : prev?.lastSignificantTime,
-                changePercent: shouldUpdateReference ? 0 : changePercent
+                openPrice,
+                dailyChange
               };
             });
           }
@@ -102,32 +116,29 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
         }
       };
 
-      ws.onerror = (e) => {
-        console.error('WebSocket error:', e);
+      newWs.onerror = () => {
         setError('WebSocket connection error');
-        setIsConnecting(false);
       };
 
-      ws.onclose = () => {
+      newWs.onclose = () => {
         console.log('WebSocket disconnected, attempting to reconnect...');
-        setIsConnecting(true);
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        setTimeout(connectWebSocket, 3000);
       };
+
+      setWs(newWs);
     };
 
+    initialize();
     connectWebSocket();
 
     return () => {
       if (ws) {
         ws.close();
       }
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
     };
   }, [symbol]);
 
-  // Loading or error state
+  // Loading state
   if (isConnecting && !price) {
     return (
       <div className="bg-white rounded-lg p-6 shadow-lg">
@@ -179,10 +190,18 @@ function PriceDisplay({ symbol = 'BTC-USDT' }: PriceDisplayProps) {
               maximumFractionDigits: 2,
             })}
           </div>
-          {price.changePercent !== undefined && (
-            <div className={`text-sm font-medium ${getPriceChangeClass(price.changePercent)}`}>
-              {formatPriceChange(price.changePercent)}
-              <span className="text-gray-500 ml-1">in the last minute</span>
+          {price.dailyChange !== undefined && (
+            <div className={`text-sm font-medium ${getPriceChangeClass(price.dailyChange)}`}>
+              {formatPriceChange(price.dailyChange)}
+              <span className="text-gray-500 ml-1">today</span>
+            </div>
+          )}
+          {price.openPrice && (
+            <div className="text-sm text-gray-500">
+              Open: ${price.openPrice.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </div>
           )}
           <div className="text-sm text-gray-500">

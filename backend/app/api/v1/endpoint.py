@@ -11,6 +11,8 @@ import ccxt
 import re
 from functools import lru_cache
 from datetime import datetime, timedelta
+import pandas as pd
+from app.services.signals.signal_generator import SignalGenerator
 
 class DataCache:
     def __init__(self, max_age_seconds=30):
@@ -271,7 +273,7 @@ async def get_indicators(
     indicators: str = Query(..., description="Comma-separated list of indicators"),
     timeframe: str = Query("1h", regex="^(1h|4h|1d)$")
 ):
-    """Get technical indicators for a crypto pair with caching"""
+    """Get technical indicators and signals for a crypto pair with caching"""
     try:
         # Create a unique cache key based on pair, indicators, and timeframe
         cache_key = f"{pair}_{indicators}_{timeframe}"
@@ -321,8 +323,33 @@ async def get_indicators(
                 "middle": float(middle.iloc[-1]),
                 "lower": float(lower.iloc[-1])
             }
+
+        # Generate signals using your existing SignalGenerator
+        latest_data = pd.DataFrame({
+            'timestamp': [data['timestamp'].iloc[-1]],
+            'close': [data['close'].iloc[-1]],
+            'rsi': [result.get('rsi')],
+            'macd': [result['macd']['macd']] if 'macd' in result else [None],
+            'macd_signal': [result['macd']['signal']] if 'macd' in result else [None],
+            'bb_upper': [result['bb']['upper']] if 'bb' in result else [None],
+            'bb_lower': [result['bb']['lower']] if 'bb' in result else [None],
+        })
+
+        signal_generator = SignalGenerator()
+        signals = signal_generator.generate_signals(latest_data)
+        
+        # Convert signals to dictionary format
+        result["signals"] = [
+            {
+                "type": signal.type.value,
+                "indicator": signal.indicator,
+                "strength": signal.strength,
+                "message": signal.message
+            }
+            for signal in signals
+        ]
             
-        print(f"Calculated indicators: {result}")
+        print(f"Calculated indicators and signals: {result}")
         
         # Cache the result
         data_cache.set(cache_key, result)
