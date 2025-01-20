@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect } from 'react';
 
 interface IndicatorData {
   rsi: number;
@@ -23,45 +22,67 @@ function TechnicalIndicators({ symbol }: TechnicalIndicatorsProps) {
   const [data, setData] = useState<IndicatorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       try {
-        setLoading(true);
-        setError(null);
-        
-        const response = await axios.get<IndicatorData>(
-          `http://localhost:8000/api/v1/crypto/indicators/${symbol}`,
-          { 
-            params: { 
-              indicators: 'rsi,macd,bb',
-              timeframe: '1h'
-            } 
-          }
+        const response = await fetch(
+          `http://localhost:8000/api/v1/crypto/indicators/${symbol}?indicators=rsi,macd,bb&timeframe=1h`
         );
-
-        // Validate response data
-        if (response.data && 
-            typeof response.data.rsi === 'number' && 
-            response.data.macd && 
-            response.data.bb) {
-          setData(response.data);
-        } else {
-          throw new Error('Invalid data structure received');
-        }
-
-      } catch (err) {
-        console.error('Error fetching indicator data:', err);
-        setError('Failed to fetch indicator data');
-      } finally {
+        const initialData = await response.json();
+        setData(initialData);
+        setLoading(false);
+      } catch (error) {
+        setError('Failed to fetch initial indicator data');
         setLoading(false);
       }
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const connectWebSocket = () => {
+      const wsUrl = `ws://127.0.0.1:8000/api/v1/crypto/ws/${symbol}`;
+      const newWs = new WebSocket(wsUrl);
 
-    return () => clearInterval(interval);
+      newWs.onopen = () => {
+        console.log('WebSocket connected for indicators');
+        setError(null);
+      };
+
+      newWs.onmessage = async (event) => {
+        // When we receive a price update, fetch new indicator values
+        try {
+          const response = await fetch(
+            `http://localhost:8000/api/v1/crypto/indicators/${symbol}?indicators=rsi,macd,bb&timeframe=1h`
+          );
+          const newData = await response.json();
+          setData(newData);
+        } catch (error) {
+          console.error('Error updating indicators:', error);
+        }
+      };
+
+      newWs.onerror = () => {
+        setError('WebSocket connection error');
+      };
+
+      newWs.onclose = () => {
+        console.log('WebSocket closed, attempting to reconnect...');
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      setWs(newWs);
+    };
+
+    // Fetch initial data and establish WebSocket connection
+    fetchInitialData();
+    connectWebSocket();
+
+    // Cleanup
+    return () => {
+      if (ws) {
+        ws.close();
+      }
+    };
   }, [symbol]);
 
   if (loading) {

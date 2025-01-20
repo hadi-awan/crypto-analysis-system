@@ -1,33 +1,9 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useState, useEffect } from 'react';
-import axios from 'axios';
-type AxiosError = {
-  message: string;
-  response?: {
-    data: any;
-    status: number;
-    headers: any;
-  };
-};
 
 interface ChartData {
   timestamp: string;
   close: number;
-}
-
-interface HistoricalDataPoint {
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-interface ApiResponse {
-  pair: string;
-  timeframe: string;
-  data: HistoricalDataPoint[];
 }
 
 interface PriceChartProps {
@@ -51,69 +27,116 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<TimeframeOption['value']>(initialTimeframe);
-  
-  // Store previous data to show while loading
-  const [previousData, setPreviousData] = useState<ChartData[]>([]);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  // Calculate y-axis domain based on current data
+  const yAxisDomain = useMemo(() => {
+    if (data.length === 0) return ['auto', 'auto'];
 
-        const response = await axios.get<ApiResponse>(
-          `http://localhost:8000/api/v1/crypto/historical/${symbol}`,
-          { 
-            params: { 
-              symbol, 
-              timeframe,
-              _t: new Date().getTime()
-            },
-            timeout: 10000 // Increased timeout
-          }
-        );
-        
-        const formattedData = response.data.data.map((item: HistoricalDataPoint) => ({
-          timestamp: new Date(item.timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-            timeZone: 'America/Toronto'
-          }),
-          close: item.close
-        }));
+    const prices = data.map(d => d.close);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const padding = (max - min) * 0.1; // Add 10% padding
 
-        // Store current data as previous before updating
-        setPreviousData(data);
-        setData(formattedData);
-      } catch (err) {
-        // Use previous data if available
-        if (previousData.length > 0) {
-          setData(previousData);
-        }
-        
-        const error = err as Error | AxiosError;
-        setError(error.message || 'Failed to fetch chart data');
-      } finally {
-        setLoading(false);
-      }
-    };
+    return [
+      Math.max(0, min - padding), // Ensure we don't go below 0
+      max + padding
+    ];
+  }, [data]);
 
-    // Initial fetch
-    fetchData();
+  // Function to fetch initial historical data
+  const fetchInitialData = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/crypto/historical/${symbol}?timeframe=${timeframe}`
+      );
+      const data = await response.json();
+      
+      const formattedData = data.data.map((item: any) => ({
+        timestamp: new Date(item.timestamp).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'America/Toronto'
+        }),
+        close: item.close
+      }));
 
-    // Set up polling every 10 seconds
-    const interval = setInterval(fetchData, 30000);
-
-    // Cleanup
-    return () => clearInterval(interval);
+      setData(formattedData);
+      setLoading(false);
+    } catch (error) {
+      setError('Failed to fetch initial chart data');
+      setLoading(false);
+    }
   }, [symbol, timeframe]);
 
-    // Render using data or previousData
-    const displayData = data.length > 0 ? data : previousData;
+  // WebSocket connection management
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const wsUrl = `ws://127.0.0.1:8000/api/v1/crypto/ws/${symbol}`;
+      const newWs = new WebSocket(wsUrl);
+
+      newWs.onopen = () => {
+        console.log('WebSocket connected for chart');
+        setError(null);
+      };
+
+      newWs.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        setData(prevData => {
+          // Create new data point
+          const newPoint = {
+            timestamp: new Date(message.timestamp).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+              timeZone: 'America/Toronto'
+            }),
+            close: message.price
+          };
+
+          // Add new point and maintain timeframe window
+          const newData = [...prevData, newPoint];
+          const timeframeMinutes = {
+            '1h': 60,
+            '4h': 240,
+            '1d': 1440
+          }[timeframe];
+
+          return newData.slice(-timeframeMinutes);
+        });
+      };
+
+      newWs.onerror = () => {
+        setError('WebSocket connection error');
+      };
+
+      newWs.onclose = () => {
+        console.log('WebSocket closed, attempting to reconnect...');
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      setWs(newWs);
+    };
+
+    // Reset data when symbol changes
+    setData([]);
+    setLoading(true);
+
+    // Fetch initial data and establish WebSocket connection
+    fetchInitialData();
+    connectWebSocket();
+
+    // Cleanup
+    return () => {
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [symbol, timeframe, fetchInitialData]);
 
   // Loading state
-  if (loading) {
+  if (loading && data.length === 0) {
     return (
       <div className="h-96 bg-white rounded-lg p-4 shadow-lg flex items-center justify-center">
         <div className="text-gray-500">Loading chart data...</div>
@@ -122,28 +145,13 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
   }
 
   // Error state
-  if (error) {
+  if (error && data.length === 0) {
     return (
       <div className="h-96 bg-white rounded-lg p-4 shadow-lg flex items-center justify-center">
         <div className="flex flex-col items-center">
           <div className="text-red-500 text-lg mb-2">Chart Data Error</div>
           <div className="text-gray-600 text-sm text-center mb-4">{error}</div>
-          <div className="text-xs text-gray-500 text-center">
-            Possible issues:
-            - Verify backend server is running
-            - Check network connectivity
-            - Confirm API endpoint exists
-          </div>
         </div>
-      </div>
-    );
-  }
-
-  // No data state
-  if (data.length === 0) {
-    return (
-      <div className="h-96 bg-white rounded-lg p-4 shadow-lg flex items-center justify-center">
-        <div className="text-yellow-600">No chart data available</div>
       </div>
     );
   }
@@ -176,10 +184,10 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
             tick={{ fontSize: 12 }}
           />
           <YAxis 
-            domain={['auto', 'auto']}
+            domain={yAxisDomain}
             tick={{ fontSize: 12 }}
             width={80}
-            tickFormatter={(value: number) => `$${value.toLocaleString()}`}
+            tickFormatter={(value) => `$${value.toLocaleString()}`}
           />
           <Tooltip 
             formatter={(value: number) => [`$${value.toLocaleString()}`, 'Price']}
@@ -190,6 +198,7 @@ function PriceChart({ symbol, initialTimeframe = '1h' }: PriceChartProps) {
             stroke="#2563eb" 
             dot={false}
             strokeWidth={2}
+            isAnimationActive={false} // Disable animation for smoother updates
           />
         </LineChart>
       </ResponsiveContainer>
