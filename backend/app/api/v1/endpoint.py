@@ -1,5 +1,3 @@
-
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
 from typing import List, Optional, Union
@@ -15,6 +13,8 @@ from functools import lru_cache
 from datetime import datetime, timedelta
 import pandas as pd
 from app.services.signals.signal_generator import SignalGenerator
+import aiohttp
+import time
 
 class DataCache:
     def __init__(self, max_age_seconds=30):
@@ -369,4 +369,98 @@ async def get_indicators(
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while calculating indicators: {str(e)}"
+        )
+
+@lru_cache(maxsize=1)
+def get_cached_market_data():
+    return {
+        'data': [],
+        'timestamp': 0
+    }
+
+@router.get("/crypto/market")
+async def get_market_overview(
+    quote_currency: str = Query("USDT", description="Quote currency for market data"),
+    limit: int = Query(50, ge=1, le=250, description="Number of top cryptocurrencies to fetch"),
+    sort_by: str = Query("market_cap", description="Sort field (market_cap, price, volume)")
+):
+    """
+    Fetch top cryptocurrencies with market data
+    
+    Parameters:
+    - quote_currency: Currency to use for pricing (default USDT)
+    - limit: Number of top cryptocurrencies to return
+    - sort_by: Field to sort the results
+    """
+    try:
+        # Check cache first
+        cached_data = get_cached_market_data()
+        current_time = time.time()
+        
+        # Return cached data if it's less than 5 minutes old
+        if cached_data['data'] and (current_time - cached_data['timestamp']) < 300:
+            return cached_data['data']
+        
+        # Initialize exchange
+        exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot'
+            }
+        })
+        
+        # Fetch top markets by volume
+        markets = await asyncio.to_thread(exchange.fetch_tickers)
+        
+        # Filter and process markets
+        market_data = []
+        for symbol, ticker in markets.items():
+            # Check market conditions
+            market = exchange.markets.get(symbol, {})
+            if (market.get('type') == 'spot' and 
+                market.get('quote') == quote_currency and 
+                market.get('active', False)):
+                
+                try:
+                    # Prepare market entry
+                    market_entry = {
+                        'symbol': symbol,
+                        'price': ticker['last'] or 0,
+                        'change_24h': ticker['percentage'] or 0,
+                        'volume_24h': ticker['quoteVolume'] or 0,
+                        'market_cap': (ticker['last'] or 0) * (ticker['quoteVolume'] or 0),  # Rough market cap estimate
+                        'last_updated': ticker['timestamp']
+                    }
+                    
+                    market_data.append(market_entry)
+                except Exception as e:
+                    print(f"Error processing {symbol}: {str(e)}")
+        
+        # Sort the market data
+        valid_sort_fields = ['price', 'change_24h', 'volume_24h', 'market_cap']
+        if sort_by not in valid_sort_fields:
+            sort_by = 'market_cap'
+        
+        # Sort and limit results
+        sorted_market_data = sorted(
+            market_data, 
+            key=lambda x: x.get(sort_by, 0), 
+            reverse=True
+        )[:limit]
+        
+        # Cache the result
+        cache_data = get_cached_market_data()
+        cache_data['data'] = sorted_market_data
+        cache_data['timestamp'] = current_time
+        
+        return sorted_market_data
+    
+    except Exception as e:
+        print(f"Critical error in market overview: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch market data: {str(e)}"
         )
