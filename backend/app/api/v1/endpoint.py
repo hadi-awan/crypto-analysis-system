@@ -276,23 +276,22 @@ async def get_indicators(
 ):
     """Get technical indicators and signals for a crypto pair with caching"""
     try:
-        # Create a unique cache key based on pair, indicators, and timeframe
         cache_key = f"{pair}_{indicators}_{timeframe}"
-        
-        # Try to get cached data
         cached_result = data_cache.get(cache_key)
         if cached_result:
             return cached_result
 
-        print(f"Calculating indicators for {pair}, indicators requested: {indicators}")
+        print(f"Calculating indicators for {pair}, timeframe: {timeframe}")
         
         collector = CryptoPriceCollector()
         normalized_pair = pair.replace("-", "/").upper()
         
-        print(f"Fetching historical data for {normalized_pair} with timeframe {timeframe}")
+        # Use the same timeframe as requested - these are standard exchange timeframes
+        print(f"Fetching historical data with timeframe: {timeframe}")
+        
         data = collector.fetch_historical_data(
             symbol=normalized_pair,
-            timeframe=timeframe
+            timeframe=timeframe  # Use the requested timeframe directly
         )
         
         if data is None or len(data) == 0:
@@ -304,57 +303,56 @@ async def get_indicators(
         # Calculate requested indicators
         result = {}
         indicator_list = [i.strip().lower() for i in indicators.split(",")]
-        print(f"Calculating indicators: {indicator_list}")
         
+        # Calculate RSI
+        rsi_values = analyzer.calculate_rsi()
         if "rsi" in indicator_list:
-            result["rsi"] = float(analyzer.calculate_rsi().iloc[-1])
+            result["rsi"] = float(rsi_values.iloc[-1])
         
+        # Calculate MACD
+        macd_line, signal, hist = analyzer.calculate_macd()
         if "macd" in indicator_list:
-            macd_line, signal, hist = analyzer.calculate_macd()
             result["macd"] = {
                 "macd": float(macd_line.iloc[-1]),
                 "signal": float(signal.iloc[-1]),
                 "histogram": float(hist.iloc[-1])
             }
-            
+        
+        # Calculate Bollinger Bands
+        upper, middle, lower = analyzer.calculate_bollinger_bands()
         if "bb" in indicator_list:
-            upper, middle, lower = analyzer.calculate_bollinger_bands()
             result["bb"] = {
                 "upper": float(upper.iloc[-1]),
                 "middle": float(middle.iloc[-1]),
                 "lower": float(lower.iloc[-1])
             }
 
-        # Generate signals using your existing SignalGenerator
-        latest_data = pd.DataFrame({
-            'timestamp': [data['timestamp'].iloc[-1]],
+        # Prepare data for signal generation
+        latest_indicators = pd.DataFrame({
+            'timestamp': [data.index[-1] if data.index is not None else data['timestamp'].iloc[-1]],
             'close': [data['close'].iloc[-1]],
-            'rsi': [result.get('rsi')],
-            'macd': [result['macd']['macd']] if 'macd' in result else [None],
-            'macd_signal': [result['macd']['signal']] if 'macd' in result else [None],
-            'bb_upper': [result['bb']['upper']] if 'bb' in result else [None],
-            'bb_lower': [result['bb']['lower']] if 'bb' in result else [None],
+            'rsi': [rsi_values.iloc[-1]],
+            'macd': [macd_line.iloc[-1]],
+            'macd_signal': [signal.iloc[-1]],
+            'bb_upper': [upper.iloc[-1]],
+            'bb_lower': [lower.iloc[-1]]
         })
 
+        # Generate signals
         signal_generator = SignalGenerator()
-        signals = signal_generator.generate_signals(latest_data)
+        signals = signal_generator.generate_signals(latest_indicators)
         
-        # Convert signals to dictionary format
         result["signals"] = [
             {
                 "type": signal.type.value,
                 "indicator": signal.indicator,
-                "strength": signal.strength,
+                "strength": float(signal.strength),
                 "message": signal.message
             }
             for signal in signals
         ]
             
-        print(f"Calculated indicators and signals: {result}")
-        
-        # Cache the result
         data_cache.set(cache_key, result)
-        
         return result
         
     except ValueError as e:
@@ -365,6 +363,8 @@ async def get_indicators(
         )
     except Exception as e:
         print(f"Unexpected error in indicator calculation: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while calculating indicators: {str(e)}"

@@ -23,7 +23,7 @@ class SignalGenerator:
     def __init__(self):
         self.strategies = {
             'RSI': (self._check_rsi, ['rsi']),
-            'MACD': (self._check_macd, ['macd', 'macd_signal']),
+            'MACD': (self._check_macd, ['macd', 'macd_signal', 'close']),
             'BB': (self._check_bollinger_bands, ['bb_upper', 'bb_lower', 'close']),
             'STOCH': (self._check_stochastic, ['stoch_k', 'stoch_d'])
         }
@@ -72,50 +72,31 @@ class SignalGenerator:
         macd = data['macd'].iloc[-1]
         signal = data['macd_signal'].iloc[-1]
         timestamp = data['timestamp'].iloc[-1]
+        price = data['close'].iloc[-1]  # Get current price for normalization
 
-        # Determine if the MACD is above or below the zero line
-        macd_above_zero = macd > 0
-        macd_below_zero = macd < 0
-
-        # MACD Bullish Crossover (above the zero line is a stronger signal)
+        # MACD Bullish Crossover
         if macd > signal:
-            strength = min((macd - signal) / signal * 100, 1)
-            if macd_above_zero:  # Additional confirmation: MACD above zero
-                return Signal(
-                    type=SignalType.BUY,
-                    indicator="MACD",
-                    strength=strength,
-                    message=f"MACD Bullish Crossover (Strong, Above Zero Line)",
-                    timestamp=timestamp
-                )
-            else:
-                return Signal(
-                    type=SignalType.BUY,
-                    indicator="MACD",
-                    strength=strength,
-                    message=f"MACD Bullish Crossover (Weak, Below Zero Line)",
-                    timestamp=timestamp
-                )
+            # Calculate strength based on the difference relative to price
+            strength = min(abs(macd - signal) / (price * 0.001), 1.0)  # Scale by 0.1% of price
+            return Signal(
+                type=SignalType.BUY,
+                indicator="MACD",
+                strength=strength,
+                message=f"MACD Bullish Crossover ({strength*100:.2f}% strength)",
+                timestamp=timestamp
+            )
 
-        # MACD Bearish Crossover (below the zero line is a stronger signal)
+        # MACD Bearish Crossover
         elif macd < signal:
-            strength = min((signal - macd) / signal * 100, 1)
-            if macd_below_zero:  # Additional confirmation: MACD below zero
-                return Signal(
-                    type=SignalType.SELL,
-                    indicator="MACD",
-                    strength=strength,
-                    message=f"MACD Bearish Crossover (Strong, Below Zero Line)",
-                    timestamp=timestamp
-                )
-            else:
-                return Signal(
-                    type=SignalType.SELL,
-                    indicator="MACD",
-                    strength=strength,
-                    message=f"MACD Bearish Crossover (Weak, Above Zero Line)",
-                    timestamp=timestamp
-                )
+            # Calculate strength based on the difference relative to price
+            strength = min(abs(macd - signal) / (price * 0.001), 1.0)  # Scale by 0.1% of price
+            return Signal(
+                type=SignalType.SELL,
+                indicator="MACD",
+                strength=strength,
+                message=f"MACD Bearish Crossover ({strength*100:.2f}% strength)",
+                timestamp=timestamp
+            )
 
         return None
 
