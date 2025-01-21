@@ -18,10 +18,15 @@ interface CryptoPairsResponse {
 interface CryptoSearchProps {
   onSelectPair: (pair: string) => void;
   className?: string;
+  defaultPair?: string; // Added optional default pair
 }
 
-function CryptoSearch({ onSelectPair, className }: CryptoSearchProps) {
-  const [searchTerm, setSearchTerm] = useState('');
+function CryptoSearch({ 
+  onSelectPair, 
+  className, 
+  defaultPair = 'BTC-USDT' 
+}: CryptoSearchProps) {
+  const [searchTerm, setSearchTerm] = useState(defaultPair);
   const [pairs, setPairs] = useState<CryptoPair[]>([]);
   const [filteredPairs, setFilteredPairs] = useState<CryptoPair[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);

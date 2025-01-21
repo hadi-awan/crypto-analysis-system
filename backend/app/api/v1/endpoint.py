@@ -15,6 +15,7 @@ import pandas as pd
 from app.services.signals.signal_generator import SignalGenerator
 import aiohttp
 import time
+import numpy as np
 
 class DataCache:
     def __init__(self, max_age_seconds=30):
@@ -464,3 +465,281 @@ async def get_market_overview(
             status_code=500,
             detail=f"Failed to fetch market data: {str(e)}"
         )
+
+@router.get("/crypto/comprehensive-analysis/{pair}")
+async def get_comprehensive_analysis(
+    pair: str,
+    timeframe: str = Query("1d", description="Timeframe for analysis"),
+    quote_currency: str = Query("USDT", description="Quote currency")
+):
+    """
+    Fetch comprehensive cryptocurrency analysis
+    
+    Parameters:
+    - pair: Trading pair
+    - timeframe: Analysis timeframe
+    - quote_currency: Quote currency for pricing
+    """
+    try:
+        # Normalize pair
+        normalized_pair = pair.replace('-', '/').upper()
+        
+        # Initialize services
+        collector = CryptoPriceCollector()
+        
+        # Fetch historical data
+        historical_data = await asyncio.to_thread(
+            collector.fetch_historical_data, 
+            normalized_pair, 
+            timeframe=timeframe
+        )
+        
+        # Initialize analyzer with historical data
+        analyzer = TechnicalAnalyzer(historical_data)
+        
+        # Historical Performance Analysis
+        yearly_returns = _calculate_yearly_returns(historical_data)
+        total_return = _calculate_total_return(historical_data)
+        volatility = _calculate_volatility(historical_data)
+        max_drawdown = _calculate_max_drawdown(historical_data)
+        
+        # Volume Analysis
+        volume_analysis = _analyze_volume(historical_data)
+        
+        # Correlation Analysis
+        correlations = _calculate_correlations(normalized_pair)
+        
+        # Support and Resistance Levels
+        support_resistance = _identify_support_resistance_levels(historical_data)
+        
+        # Compile comprehensive analysis
+        comprehensive_analysis = {
+            "historical_performance": {
+                "yearly_returns": yearly_returns,
+                "total_return": total_return,
+                "volatility": volatility,
+                "max_drawdown": max_drawdown
+            },
+            "volume_analysis": volume_analysis,
+            "correlations": correlations,
+            "support_resistance": support_resistance
+        }
+        
+        return comprehensive_analysis
+    
+    except Exception as e:
+        print(f"Error in comprehensive analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch comprehensive analysis: {str(e)}"
+        )
+
+def _calculate_yearly_returns(data):
+    """
+    Calculate yearly returns from historical price data with more comprehensive calculation
+    """
+    if len(data) == 0:
+        return []
+    
+    # Convert to datetime index if not already
+    if not isinstance(data.index, pd.DatetimeIndex):
+        data.index = pd.to_datetime(data.index)
+    
+    # Group by year and calculate returns
+    yearly_returns = []
+    
+    # Get unique years in the data
+    years = data.index.year.unique()
+    
+    for year in years:
+        # Filter data for the specific year
+        yearly_data = data[data.index.year == year]
+        
+        if len(yearly_data) > 0:
+            # First and last price of the year
+            first_price = yearly_data.iloc[0]['close']
+            last_price = yearly_data.iloc[-1]['close']
+            
+            # Calculate yearly return
+            yearly_return = ((last_price - first_price) / first_price) * 100
+            
+            yearly_returns.append({
+                "year": year,
+                "return_percentage": float(yearly_return)
+            })
+    
+    return yearly_returns
+
+def _calculate_total_return(data):
+    """Calculate total return percentage"""
+    if len(data) > 0:
+        first_price = data.iloc[0]['close']
+        last_price = data.iloc[-1]['close']
+        return ((last_price - first_price) / first_price) * 100
+    return 0
+
+def _calculate_volatility(data):
+    """Calculate price volatility"""
+    returns = np.log(data['close'] / data['close'].shift(1))
+    return float(returns.std() * np.sqrt(len(returns)) * 100)
+
+def _calculate_max_drawdown(data):
+    """Calculate maximum drawdown percentage"""
+    cumulative_max = data['close'].cummax()
+    drawdown = (data['close'] - cumulative_max) / cumulative_max * 100
+    return float(drawdown.min())
+
+def _analyze_volume(data):
+    """Analyze trading volume"""
+    # Ensure data is a DataFrame and reset index if needed
+    if not isinstance(data, pd.DataFrame):
+        data = pd.DataFrame(data)
+    
+    # Ensure timestamp column exists and is in datetime format
+    if 'timestamp' in data.columns:
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        data.set_index('timestamp', inplace=True)
+    
+    # Calculate daily volume trend
+    volumes = data['volume']
+    volume_trend = 'neutral'
+    if len(volumes) > 1:
+        volume_change = (volumes.iloc[-1] - volumes.iloc[0]) / volumes.iloc[0]
+        volume_trend = 'increasing' if volume_change > 0.1 else \
+                       'decreasing' if volume_change < -0.1 else 'neutral'
+    
+    # Convert volume data to list of dictionaries
+    daily_volume = [
+        {
+            "date": str(data.index[i].date()) if hasattr(data.index[i], 'date') else str(data.index[i]),
+            "volume": float(data['volume'].iloc[i])
+        } for i in range(len(data))
+    ]
+    
+    return {
+        "daily_volume": daily_volume,
+        "avg_daily_volume": float(volumes.mean()),
+        "volume_trend": volume_trend,
+        "max_volume_day": {
+            "date": str(data.index[volumes.argmax()].date()) if hasattr(data.index[volumes.argmax()], 'date') else str(data.index[volumes.argmax()]),
+            "volume": float(volumes.max())
+        }
+    }
+
+async def _calculate_correlations(pair: str):
+    """
+    Calculate correlations with other major cryptocurrencies using actual historical price data
+    """
+    try:
+        # Initialize exchange
+        exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot'
+            }
+        })
+        
+        # List of major cryptocurrencies to compare
+        comparison_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT']
+        
+        # Remove the current pair from comparison if present
+        if pair in comparison_pairs:
+            comparison_pairs.remove(pair)
+        
+        # Fetch historical data for all pairs
+        correlations = []
+        for compare_pair in comparison_pairs:
+            try:
+                # Fetch historical data
+                historical_data = await asyncio.to_thread(
+                    CryptoPriceCollector().fetch_historical_data, 
+                    compare_pair, 
+                    timeframe='1d'  # Use daily data for correlation
+                )
+                
+                # Calculate correlation
+                current_pair_data = await asyncio.to_thread(
+                    CryptoPriceCollector().fetch_historical_data, 
+                    pair, 
+                    timeframe='1d'
+                )
+                
+                # Calculate Pearson correlation coefficient
+                corr_coef = current_pair_data['close'].corr(historical_data['close'])
+                
+                # Determine correlation type
+                correlation_type = (
+                    'positive' if corr_coef > 0.5 else 
+                    'negative' if corr_coef < -0.5 else 
+                    'neutral'
+                )
+                
+                correlations.append({
+                    "asset": compare_pair,
+                    "correlation_coefficient": float(corr_coef),
+                    "correlation_type": correlation_type
+                })
+            
+            except Exception as e:
+                print(f"Error calculating correlation for {compare_pair}: {str(e)}")
+        
+        return {"correlations": correlations}
+    
+    except Exception as e:
+        print(f"Error in correlation calculation: {str(e)}")
+        return {"correlations": []}
+
+def _identify_support_resistance_levels(data):
+    """Identify support and resistance levels"""
+    if len(data) == 0:
+        return {
+            "price_history": [],
+            "support_levels": [],
+            "resistance_levels": [],
+            "current_price": 0
+        }
+    
+    # Convert to list of dictionaries for serialization
+    price_history = [
+        {
+            "date": str(data.index[i].date()),
+            "price": float(data.iloc[i]['close'])
+        } for i in range(len(data))
+    ]
+    
+    # Calculate close prices
+    close_prices = data['close']
+    
+    # Calculate support levels
+    support_levels = [
+        {
+            "level": float(close_prices.rolling(window=20).min().iloc[-1]),
+            "strength": 0.7
+        },
+        {
+            "level": float(close_prices.rolling(window=50).min().iloc[-1]),
+            "strength": 0.5
+        }
+    ]
+    
+    # Calculate resistance levels
+    resistance_levels = [
+        {
+            "level": float(close_prices.rolling(window=20).max().iloc[-1]),
+            "strength": 0.7
+        },
+        {
+            "level": float(close_prices.rolling(window=50).max().iloc[-1]),
+            "strength": 0.5
+        }
+    ]
+    
+    return {
+        "price_history": price_history,
+        "support_levels": support_levels,
+        "resistance_levels": resistance_levels,
+        "current_price": float(close_prices.iloc[-1])
+    }
