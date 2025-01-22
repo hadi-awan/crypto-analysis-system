@@ -111,4 +111,7 @@ BINANCE_SECRET_KEY=your_secret_key
 <li>Historical performance analysis</li>
 <li>Price alerts and notifications</li>
 
+![screenshot](images/1.png)
+![screenshot](images/2.png)
+
 
